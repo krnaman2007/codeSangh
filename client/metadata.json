@@ -1,0 +1,6 @@
+{
+  "name": "DevSync",
+  "description": "Browser-based collaborative development platform with language-independent projects, live cursor tracking, and instant multi-language execution.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

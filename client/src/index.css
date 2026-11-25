@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+:root {
+  color-scheme: dark;
+  --bg-canvas: #050507;
+  --bg-surface: #0B0B0F;
+  --bg-elevated: #111116;
+  --bg-hover: #18181F;
+  --border-hairline: rgba(255, 255, 255, 0.07);
+  --text-primary: #F4F4F6;
+  --text-secondary: #9494A3;
+  --text-muted: #5C5C6E;
+  --accent-indigo: #5E5CE6;
+}
+
+@layer base {
+  * {
+    border-color: rgba(255, 255, 255, 0.07);
+  }
+}
+
+html,
+body {
+  background-color: #050507;
+  color: #F4F4F6;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Crisp mechanical transitions */
+.transition-mechanical {
+  transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out, opacity 150ms ease-out, transform 150ms ease-out;
+}
+
+/* Workly-inspired active sidebar glow */
+.sidebar-active-item {
+  position: relative;
+  background: linear-gradient(90deg, rgba(24, 24, 31, 0.9) 0%, rgba(94, 92, 230, 0.22) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-active-item::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  right: 0;
+  width: 2.5px;
+  border-radius: 2px;
+  background: #5E5CE6;
+  box-shadow: 0 0 10px 1px rgba(94, 92, 230, 0.75);
+}
+
+/* Subtle dot-grid background for Auth & Landing */
+.bg-dot-grid {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Subtle hairline grid for Landing hero */
+.bg-hairline-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+/* Editor synchronized scroll & caret */
+.code-editor-layer {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 22px;
+  tab-size: 2;
+  letter-spacing: 0;
+}
+
+/* Minimalist dark scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
