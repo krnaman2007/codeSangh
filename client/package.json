@@ -8,29 +8,45 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "tsx --import ./src/test/domSetup.ts --test src/utils/devsync.test.ts src/api/errors.test.ts src/utils/shortcuts.test.ts src/hooks/usePermissions.test.ts src/realtime/eventDedup.test.ts src/utils/aiMarkdown.test.ts src/components/ui/primitives.test.tsx src/integration/authAndProjects.test.tsx src/integration/workspaceFlows.test.tsx"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-query": "^5.108.4",
     "@vitejs/plugin-react": "^6.1.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "dompurify": "^3.5.0",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "lib0": "^0.2.120",
     "lucide-react": "^0.546.0",
+    "monaco-editor": "^0.58.0",
+    "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "react-router-dom": "^7.18.7",
+    "socket.io-client": "^4.8.4",
     "vite": "^8.3.0",
-    "express": "^4.21.2",
-    "dotenv": "^17.2.3",
-    "motion": "^12.23.24"
+    "y-monaco": "^0.1.6",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.33"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@types/dompurify": "^3.0.5",
+    "@types/express": "^4.17.21",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.0",
+    "jsdom": "^31.0.1",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
-    "typescript": "^7.0.2",
-    "@types/express": "^4.17.21"
+    "typescript": "^7.0.2"
   }
 }

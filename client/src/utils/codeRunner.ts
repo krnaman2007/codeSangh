@@ -369,6 +369,14 @@ export function executeFile(file: FileNode): RunResult {
     case 'html':
     case 'css':
       return runMarkupOrStyle(code, language, file.name);
+    case 'text':
+      return {
+        status: 'error',
+        stdout: '',
+        stderr: `Plain text files (${file.name}) cannot be executed directly.`,
+        durationMs: 1,
+        runtime: 'Plain text',
+      };
   }
 }
 

@@ -7,41 +7,205 @@
 
 :root {
   color-scheme: dark;
-  --bg-canvas: #050507;
-  --bg-surface: #0B0B0F;
-  --bg-elevated: #111116;
-  --bg-hover: #18181F;
+
+  /* Core foundation surfaces */
+  --surface-canvas: #050507;
+  --surface-base: #0b0b0f;
+  --surface-elevated: #111116;
+  --surface-hover: #18181f;
+  --surface-active: #20202a;
+
+  /* Glass surface opacity & solid fallbacks */
+  --surface-glass-opacity: 0.74;
+  --surface-glass-strong-opacity: 0.88;
+  --surface-glass: rgba(17, 17, 22, 0.74);
+  --surface-glass-strong: rgba(17, 17, 22, 0.88);
+  --surface-glass-subtle: rgba(11, 11, 15, 0.68);
+  --surface-glass-fallback: #121218;
+  --surface-glass-strong-fallback: #16161e;
+
+  /* Backdrop blur levels (never applied to editor or terminal text) */
+  --blur-sm: 8px;
+  --blur-md: 16px;
+  --blur-lg: 24px;
+
+  /* Borders & highlights */
   --border-hairline: rgba(255, 255, 255, 0.07);
-  --text-primary: #F4F4F6;
-  --text-secondary: #9494A3;
-  --text-muted: #5C5C6E;
-  --accent-indigo: #5E5CE6;
+  --border-glass: rgba(255, 255, 255, 0.11);
+  --border-glass-strong: rgba(255, 255, 255, 0.16);
+  --border-focus: #818cf8;
+
+  /* Elevation & inner highlight shadows */
+  --shadow-glass: 0 12px 36px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --shadow-elevated: 0 20px 52px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  --shadow-button: 0 4px 14px rgba(94, 92, 230, 0.28);
+
+  /* Typography & ink */
+  --text-primary: #f4f4f6;
+  --text-secondary: #9494a3;
+  --text-muted: #6e6e80;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.125rem;
+  --text-2xl: 1.5rem;
+
+  /* Restrained accent family */
+  --accent-primary: #5e5ce6;
+  --accent-hover: #4f46e5;
+  --accent-soft: rgba(94, 92, 230, 0.16);
+  --accent-ring: rgba(129, 140, 248, 0.75);
+
+  /* Semantic state tokens */
+  --state-success: #22c55e;
+  --state-success-bg: rgba(34, 197, 94, 0.12);
+  --state-success-border: rgba(34, 197, 94, 0.3);
+  --state-warning: #eab308;
+  --state-warning-bg: rgba(234, 179, 8, 0.12);
+  --state-warning-border: rgba(234, 179, 8, 0.3);
+  --state-danger: #ef4444;
+  --state-danger-bg: rgba(239, 68, 68, 0.12);
+  --state-danger-border: rgba(239, 68, 68, 0.3);
+  --state-info: #60a5fa;
+  --state-info-bg: rgba(96, 165, 250, 0.12);
+  --state-info-border: rgba(96, 165, 250, 0.3);
+
+  /* Spacing & radii */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-pill: 9999px;
+
+  /* Motion durations (150-240ms range) */
+  --duration-fast: 150ms;
+  --duration-normal: 180ms;
+  --duration-panel: 220ms;
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @layer base {
   * {
-    border-color: rgba(255, 255, 255, 0.07);
+    border-color: var(--border-hairline);
   }
 }
 
 html,
 body {
-  background-color: #050507;
-  color: #F4F4F6;
+  background-color: var(--surface-canvas);
+  color: var(--text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
+}
+
+/* Smooth anchor scrolling ONLY for document/marketing routes; workspace routes stay instant */
+html:has(.marketing-scroll) {
+  scroll-behavior: smooth;
+}
+
+/* Visible keyboard focus ring with >= 3:1 contrast against dark canvas */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* Visually hidden utility preserving screen-reader access and focus-within skip links */
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+}
+
+/* Reusable glass surfaces with non-blur fallbacks */
+.glass-surface {
+  background-color: var(--surface-glass-fallback);
+  border: 1px solid var(--border-glass);
+  box-shadow: var(--shadow-glass);
+}
+
+.glass-surface-elevated {
+  background-color: var(--surface-glass-strong-fallback);
+  border: 1px solid var(--border-glass-strong);
+  box-shadow: var(--shadow-elevated);
+}
+
+.glass-toolbar {
+  background-color: var(--surface-base);
+  border-color: var(--border-hairline);
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-surface {
+    background-color: var(--surface-glass);
+    -webkit-backdrop-filter: blur(var(--blur-md));
+    backdrop-filter: blur(var(--blur-md));
+  }
+
+  .glass-surface-elevated {
+    background-color: var(--surface-glass-strong);
+    -webkit-backdrop-filter: blur(var(--blur-lg));
+    backdrop-filter: blur(var(--blur-lg));
+  }
+
+  .glass-toolbar {
+    background-color: var(--surface-glass-subtle);
+    -webkit-backdrop-filter: blur(var(--blur-sm));
+    backdrop-filter: blur(var(--blur-sm));
+  }
+}
+
+/* Native <dialog> top-layer & scroll-containment defaults */
+dialog:modal {
+  overscroll-behavior: contain;
+  margin: auto;
+  max-height: calc(100dvh - 2rem);
+  max-width: calc(100vw - 2rem);
+}
+
+dialog::backdrop {
+  background: rgba(3, 3, 6, 0.72);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  dialog::backdrop {
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+  }
 }
 
 /* Crisp mechanical transitions */
 .transition-mechanical {
-  transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out, opacity 150ms ease-out, transform 150ms ease-out;
+  transition:
+    background-color var(--duration-fast) ease-out,
+    border-color var(--duration-fast) ease-out,
+    color var(--duration-fast) ease-out,
+    opacity var(--duration-fast) ease-out,
+    transform var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) ease-out;
 }
 
-/* Workly-inspired active sidebar glow */
+/* Active sidebar item accent */
 .sidebar-active-item {
   position: relative;
-  background: linear-gradient(90deg, rgba(24, 24, 31, 0.9) 0%, rgba(94, 92, 230, 0.22) 100%);
+  background: linear-gradient(90deg, rgba(24, 24, 31, 0.92) 0%, rgba(94, 92, 230, 0.22) 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -53,7 +217,7 @@ body {
   right: 0;
   width: 2.5px;
   border-radius: 2px;
-  background: #5E5CE6;
+  background: var(--accent-primary);
   box-shadow: 0 0 10px 1px rgba(94, 92, 230, 0.75);
 }
 
@@ -71,7 +235,7 @@ body {
   background-size: 64px 64px;
 }
 
-/* Editor synchronized scroll & caret */
+/* Editor synchronized scroll & caret (never apply glass blur here) */
 .code-editor-layer {
   font-family: var(--font-mono);
   font-size: 13px;
@@ -80,7 +244,83 @@ body {
   letter-spacing: 0;
 }
 
+.devsync-breakpoint-glyph {
+  background: #ef4444;
+  border-radius: 9999px;
+  width: 9px !important;
+  height: 9px !important;
+  margin-left: 5px;
+  margin-top: 6px;
+}
+
+.devsync-debug-active-line {
+  background: rgba(234, 179, 8, 0.14);
+}
+
+.devsync-debug-arrow-glyph {
+  border-left: 6px solid #eab308;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  width: 0 !important;
+  height: 0 !important;
+  margin-left: 6px;
+  margin-top: 7px;
+}
+
+/* Yjs remote cursor & selection labels over dark editor (zero blur) */
+.yRemoteSelection {
+  background-color: rgba(94, 92, 230, 0.24);
+}
+
+.yRemoteSelectionHead {
+  position: absolute;
+  border-left: 2px solid #5e5ce6;
+  border-top: 2px solid #5e5ce6;
+  border-bottom: 2px solid #5e5ce6;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.yRemoteSelectionHead::after {
+  position: absolute;
+  content: attr(data-user-name);
+  top: -16px;
+  left: -2px;
+  padding: 1px 5px;
+  border-radius: 3px 3px 3px 0;
+  background-color: #5e5ce6;
+  color: #f4f4f6;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Card hover/focus-within action reveal */
+.card-actions {
+  opacity: 0;
+  transition: opacity var(--duration-fast) ease-out;
+}
+
+.group:hover .card-actions,
+.group:focus-within .card-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .card-actions {
+    opacity: 1;
+  }
+}
+
 /* Minimalist dark scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -91,18 +331,58 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Purposeful lift & reveal motion — static by default, animated only when user allows motion */
+.hover-lift {
+  transition:
+    background-color var(--duration-fast) ease-out,
+    border-color var(--duration-fast) ease-out,
+    box-shadow var(--duration-normal) ease-out;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hover-lift {
+    transition:
+      background-color var(--duration-fast) ease-out,
+      border-color var(--duration-fast) ease-out,
+      box-shadow var(--duration-normal) ease-out,
+      transform var(--duration-normal) var(--ease-standard);
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-2px);
+  }
+
+  .reveal-in {
+    animation: fade-slide-in var(--duration-panel) var(--ease-standard) both;
+  }
+}
+
+@keyframes fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+  html:has(.marketing-scroll) {
+    scroll-behavior: auto;
+  }
+
+  .transition-mechanical,
+  .hover-lift {
+    transition-property: background-color, border-color, color, opacity;
   }
 }

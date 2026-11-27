@@ -4,7 +4,8 @@ export type SupportedLanguage =
   | 'cpp'
   | 'java'
   | 'html'
-  | 'css';
+  | 'css'
+  | 'text';
 
 export type Role = 'owner' | 'editor' | 'viewer';
 
