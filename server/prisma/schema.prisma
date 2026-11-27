@@ -1,0 +1,26 @@
+// server/prisma/schema.prisma
+// DevSync Database Schema (Neon PostgreSQL + Prisma)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String    @db.VarChar(50)
+  email        String    @unique @db.VarChar(254)
+  passwordHash String    @map("password_hash")
+  avatarColor  String    @map("avatar_color") @db.VarChar(7)
+  preferences  Json      @default("{\"aiSuggestions\":true,\"suggestionDelayMs\":400}")
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("users")
+}
