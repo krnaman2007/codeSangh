@@ -1,6 +1,6 @@
 import * as Y from 'yjs';
 import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate } from 'y-protocols/awareness';
-import { MonacoBinding } from 'y-monaco';
+import type { MonacoBinding } from 'y-monaco';
 import type * as monaco from 'monaco-editor';
 
 export interface YjsDocumentEntry {
@@ -126,17 +126,24 @@ export class YjsWorkspaceManager {
       entry.binding = null;
     }
 
-    const binding = new MonacoBinding(
-      entry.yText,
-      model,
-      new Set([editor]),
-      entry.awareness
-    );
-    entry.binding = binding;
+    let cancelled = false;
+    let activeBinding: MonacoBinding | null = null;
+
+    void import('y-monaco').then(({ MonacoBinding: RuntimeMonacoBinding }) => {
+      if (cancelled || !this.entries.has(fileId)) return;
+      activeBinding = new RuntimeMonacoBinding(
+        entry.yText,
+        model,
+        new Set([editor]),
+        entry.awareness
+      );
+      entry.binding = activeBinding;
+    });
 
     return () => {
-      if (entry.binding === binding) {
-        binding.destroy();
+      cancelled = true;
+      if (activeBinding && entry.binding === activeBinding) {
+        activeBinding.destroy();
         entry.binding = null;
       }
     };

@@ -295,7 +295,7 @@ export function Dashboard({
                 </button>
               ))}
             </div>
-            <search className="relative flex-1">
+            <div role="search" className="relative flex-1">
               <Search
                 className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
                 strokeWidth={1.5}
@@ -308,7 +308,7 @@ export function Dashboard({
                 aria-label="Search projects"
                 className="w-full rounded-lg bg-[var(--surface-base)] border border-[var(--border-hairline)] pl-8 pr-3 py-1.5 text-[13px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)]"
               />
-            </search>
+            </div>
           </div>
         </header>
 
