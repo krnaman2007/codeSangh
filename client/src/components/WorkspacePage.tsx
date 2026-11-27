@@ -9,8 +9,11 @@ import {
   PanelLeftOpen,
   Pencil,
   Play,
+  RefreshCw,
   Search,
   Share2,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import { ApiClientError } from '../api/errors';
 import type { ApiExecutionRecord } from '../api/types';
@@ -18,22 +21,25 @@ import { useLeaveProjectMutation, useProjectsQuery, useProjectDetailsQuery, useR
 import { useFileDetailQuery, useLanguagesQuery, useNodeMutations, useProjectTreeQuery } from '../hooks/useProjectNodes';
 import { useRunFileMutation } from '../hooks/useExecutions';
 import { usePermissions } from '../hooks/usePermissions';
+import { useRealtimeWorkspace } from '../hooks/useRealtimeWorkspace';
+import { getInitials, useAuth } from '../state/authStore';
 import { getNodeBreadcrumb, getSortedChildren } from '../utils/fileTree';
 import { detectPlatform, matchWorkspaceShortcut } from '../utils/shortcuts';
 import { useUiStore } from '../state/uiStore';
 import type { FileNode, Project, SupportedLanguage } from '../types/devsync';
 import { BrandLogo } from './BrandMark';
 import { FileExplorer } from './FileExplorer';
-import { MonacoCodeEditor, type FileSaveState, type OpenEditorFile } from './MonacoCodeEditor';
+import { MonacoCodeEditor, type FileSaveState, type MonacoModelBindingContext, type OpenEditorFile } from './MonacoCodeEditor';
 import { ExecutionPanel, type WorkspaceBottomTab } from './ExecutionPanel';
 import { CollaboratorsDialog } from './CollaboratorsDialog';
 import { CommandPalette } from './CommandPalette';
 import { ProjectErrorState } from './ProjectErrorState';
-import { Dialog, GlassButton, GlassPanel, RoleChip, Skeleton, Tooltip } from './ui';
+import { Dialog, GlassButton, GlassPanel, RoleChip, Skeleton, StatusChip, Tooltip } from './ui';
 
 export function WorkspacePage() {
   const { projectId = '' } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { pushToast, commandPaletteOpen, setCommandPaletteOpen } = useUiStore();
 
   const projectQuery = useProjectDetailsQuery(projectId);
@@ -57,6 +63,7 @@ export function WorkspacePage() {
   const [latestExecution, setLatestExecution] = useState<ApiExecutionRecord | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [accessRevoked, setAccessRevoked] = useState(false);
 
   // Explorer focus & shortcut triggers
   const [explorerFocused, setExplorerFocused] = useState(false);
@@ -145,6 +152,48 @@ export function WorkspacePage() {
   const projectName = projectQuery.data?.project.name ?? '';
   const languages = languagesQuery.data?.languages ?? [];
 
+  const realtime = useRealtimeWorkspace({
+    projectId,
+    activeFileId,
+    enabled: Boolean(projectQuery.data) && !accessRevoked,
+    onRoleChanged: (nextRole) => {
+      pushToast(`Workspace role updated to ${nextRole}`, 'info');
+    },
+    onAccessRevoked: () => {
+      setAccessRevoked(true);
+    },
+  });
+
+  const yjsManagedFileIds = useMemo(() => {
+    if (realtime.connectionState !== 'connected' || !activeFileId) {
+      return new Set<string>();
+    }
+    return new Set<string>([activeFileId]);
+  }, [realtime.connectionState, activeFileId]);
+
+  const handleModelAttached = useCallback(
+    ({ editor, model, fileId }: MonacoModelBindingContext) => {
+      if (realtime.connectionState !== 'connected' || !user) {
+        return;
+      }
+      const socket = realtime.socketRef.current;
+      realtime.yjsManager.getOrCreateDoc(
+        fileId,
+        { id: user.id, name: user.name, color: user.avatarColor },
+        (fid, update) => {
+          socket?.emit('yjs:update', { projectId, fileId: fid, update });
+        },
+        (fid, awarenessUpdate) => {
+          socket?.emit('yjs:awareness', { projectId, fileId: fid, update: awarenessUpdate });
+        }
+      );
+      const initial = draftsRef.current[fileId] ?? loadedContents[fileId] ?? model.getValue();
+      realtime.yjsManager.seedInitialContent(fileId, initial);
+      return realtime.yjsManager.attachMonaco(fileId, editor, model);
+    },
+    [loadedContents, projectId, realtime.connectionState, realtime.socketRef, realtime.yjsManager, user]
+  );
+
   const openFile = useCallback((fileId: string) => {
     setOpenTabIds((prev) => (prev.includes(fileId) ? prev : [...prev, fileId]));
     setActiveFileId(fileId);
@@ -186,13 +235,17 @@ export function WorkspacePage() {
         await nodeMutations.updateContent.mutateAsync({ fileId, content });
         setLoadedContents((prev) => ({ ...prev, [fileId]: content }));
         setSaveStates((prev) => ({ ...prev, [fileId]: 'saved' }));
+        realtime.clearOfflineEdits();
       } catch (err) {
         setSaveStates((prev) => ({ ...prev, [fileId]: 'error' }));
+        if (!navigator.onLine) {
+          realtime.recordOfflineEdit();
+        }
         const msg = err instanceof ApiClientError ? err.userMessage : 'Could not save file.';
         pushToast('Save failed', 'error', msg);
       }
     },
-    [nodeMutations.updateContent, perms.canEditCode, pushToast]
+    [nodeMutations.updateContent, perms.canEditCode, pushToast, realtime]
   );
 
   const handleContentEdit = useCallback(
@@ -200,6 +253,9 @@ export function WorkspacePage() {
       if (!perms.canEditCode) return;
       setDrafts((prev) => ({ ...prev, [fileId]: nextContent }));
       setSaveStates((prev) => ({ ...prev, [fileId]: 'dirty' }));
+      if (!navigator.onLine) {
+        realtime.recordOfflineEdit();
+      }
 
       const existing = saveTimersRef.current[fileId];
       if (existing) window.clearTimeout(existing);
@@ -208,7 +264,7 @@ export function WorkspacePage() {
         void saveFileNow(fileId);
       }, 900);
     },
-    [perms.canEditCode, saveFileNow]
+    [perms.canEditCode, realtime, saveFileNow]
   );
 
   const activeNode = useMemo(
@@ -373,6 +429,21 @@ export function WorkspacePage() {
           <Skeleton className="h-3 w-2/3" />
         </GlassPanel>
       </div>
+    );
+  }
+
+  if (accessRevoked) {
+    return (
+      <ProjectErrorState
+        error={
+          new ApiClientError({
+            status: 403,
+            code: 'FORBIDDEN',
+            message: 'Your access to this workspace was revoked by the project owner.',
+          })
+        }
+        titleOverride="Workspace access revoked"
+      />
     );
   }
 
@@ -591,6 +662,67 @@ export function WorkspacePage() {
         </div>
 
         <div className="flex items-center gap-2.5 shrink-0">
+          {/* Realtime Presence Avatars */}
+          {realtime.participants.length > 0 && (
+            <div
+              className="hidden md:flex items-center -space-x-1.5 mr-1"
+              aria-label={`${realtime.participants.length} collaborators online`}
+            >
+              {realtime.participants.slice(0, 4).map((p) => (
+                <div
+                  key={p.userId}
+                  title={`${p.name} (${p.role}) — Online`}
+                  className="relative w-6 h-6 rounded-full bg-[var(--surface-hover)] border border-white/[0.14] flex items-center justify-center text-[10px] font-mono text-[var(--text-primary)]"
+                >
+                  {getInitials(p.name)}
+                  <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-[var(--state-success)] ring-1 ring-[var(--surface-canvas)]" />
+                </div>
+              ))}
+              {realtime.participants.length > 4 && (
+                <span className="pl-2.5 text-[11px] font-mono text-[var(--text-secondary)]">
+                  +{realtime.participants.length - 4}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Connection / Sync State Indicator */}
+          <StatusChip
+            tone={
+              realtime.connectionState === 'connected'
+                ? 'success'
+                : realtime.connectionState === 'reconnecting' || realtime.connectionState === 'connecting'
+                ? 'warning'
+                : realtime.connectionState === 'offline'
+                ? 'danger'
+                : 'neutral'
+            }
+          >
+            {realtime.connectionState === 'connected' ? (
+              <>
+                <Wifi className="w-3 h-3" strokeWidth={1.75} />
+                <span>Live · {Math.max(1, realtime.participants.length)} online</span>
+              </>
+            ) : realtime.connectionState === 'offline' ? (
+              <>
+                <WifiOff className="w-3 h-3" strokeWidth={1.75} />
+                <span>
+                  Offline
+                  {realtime.offlineQueuedEdits > 0
+                    ? ` (${realtime.offlineQueuedEdits} local)`
+                    : ''}
+                </span>
+              </>
+            ) : realtime.connectionState === 'reconnecting' ? (
+              <>
+                <RefreshCw className="w-3 h-3 animate-spin" strokeWidth={1.75} />
+                <span>Reconnecting…</span>
+              </>
+            ) : (
+              <span>REST Sync</span>
+            )}
+          </StatusChip>
+
           <RoleChip role={role} />
 
           <button
@@ -658,7 +790,8 @@ export function WorkspacePage() {
             onSelectFile={openFile}
             onCreateFolder={async (name, parentId) => {
               try {
-                await nodeMutations.createFolder.mutateAsync({ name, parentId });
+                const res = await nodeMutations.createFolder.mutateAsync({ name, parentId });
+                realtime.markLocalTreeMutation('node:created', res.node.id);
                 pushToast(`Created folder "${name.trim()}"`, 'success');
                 return {};
               } catch (err) {
@@ -677,6 +810,7 @@ export function WorkspacePage() {
                   language,
                   parentId,
                 });
+                realtime.markLocalTreeMutation('node:created', res.node.id);
                 openFile(res.node.id);
                 pushToast(`Created ${res.node.name}`, 'success');
                 return { createdId: res.node.id };
@@ -690,6 +824,7 @@ export function WorkspacePage() {
             onRenameNode={async (nodeId, nextName) => {
               try {
                 await nodeMutations.renameNode.mutateAsync({ nodeId, name: nextName });
+                realtime.markLocalTreeMutation('node:renamed', nodeId);
                 pushToast(`Renamed to "${nextName.trim()}"`, 'success');
                 return {};
               } catch (err) {
@@ -702,6 +837,7 @@ export function WorkspacePage() {
             onMoveNode={async (nodeId, parentId) => {
               try {
                 await nodeMutations.moveNode.mutateAsync({ nodeId, parentId });
+                realtime.markLocalTreeMutation('node:moved', nodeId);
                 pushToast('Moved item', 'success');
                 return {};
               } catch (err) {
@@ -714,6 +850,7 @@ export function WorkspacePage() {
             onChangeFileLanguage={async (fileId, language) => {
               try {
                 await nodeMutations.changeLanguage.mutateAsync({ fileId, language });
+                realtime.markLocalTreeMutation('file:language', fileId);
                 pushToast('Updated file language', 'success');
                 return {};
               } catch (err) {
@@ -728,7 +865,9 @@ export function WorkspacePage() {
             onDeleteNode={async (nodeId) => {
               try {
                 const res = await nodeMutations.deleteNode.mutateAsync(nodeId);
+                realtime.markLocalTreeMutation('node:deleted', nodeId);
                 for (const deletedId of res.deletedIds) {
+                  realtime.yjsManager.destroyFile(deletedId);
                   closeTab(deletedId);
                 }
                 pushToast('Deleted item', 'info');
@@ -759,6 +898,8 @@ export function WorkspacePage() {
             onCloseTab={closeTab}
             onChangeContent={handleContentEdit}
             onSaveFile={(fileId) => void saveFileNow(fileId)}
+            onModelAttached={handleModelAttached}
+            yjsManagedFileIds={yjsManagedFileIds}
             onChangeLanguage={(fileId, language) => {
               void nodeMutations.changeLanguage
                 .mutateAsync({ fileId, language })

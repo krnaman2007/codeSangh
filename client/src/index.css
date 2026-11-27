@@ -267,6 +267,37 @@ dialog::backdrop {
   margin-top: 7px;
 }
 
+/* Yjs remote cursor & selection labels over dark editor (zero blur) */
+.yRemoteSelection {
+  background-color: rgba(94, 92, 230, 0.24);
+}
+
+.yRemoteSelectionHead {
+  position: absolute;
+  border-left: 2px solid #5e5ce6;
+  border-top: 2px solid #5e5ce6;
+  border-bottom: 2px solid #5e5ce6;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.yRemoteSelectionHead::after {
+  position: absolute;
+  content: attr(data-user-name);
+  top: -16px;
+  left: -2px;
+  padding: 1px 5px;
+  border-radius: 3px 3px 3px 0;
+  background-color: #5e5ce6;
+  color: #f4f4f6;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* Card hover/focus-within action reveal */
 .card-actions {
   opacity: 0;

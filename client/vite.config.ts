@@ -33,6 +33,10 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(rootDir, '.'),
+        'monaco-editor/esm/vs/editor/editor.api.js': path.resolve(
+          rootDir,
+          'node_modules/monaco-editor/esm/vs/editor/editor.api.js'
+        ),
       },
     },
     server: {
