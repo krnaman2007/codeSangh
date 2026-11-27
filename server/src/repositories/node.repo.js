@@ -83,6 +83,29 @@ export async function calculateNodeDepth(nodeId) {
 }
 
 /**
+ * Calculates height of a subtree rooted at nodeId
+ */
+export async function calculateSubtreeHeight(nodeId) {
+  let maxHeight = 1;
+
+  async function traverse(currentId, currentHeight) {
+    if (currentHeight > maxHeight) maxHeight = currentHeight;
+    const children = await prisma.fileNode.findMany({
+      where: { parentId: currentId },
+      select: { id: true, type: true },
+    });
+    for (const child of children) {
+      if (child.type === 'folder') {
+        await traverse(child.id, currentHeight + 1);
+      }
+    }
+  }
+
+  await traverse(nodeId, 1);
+  return maxHeight;
+}
+
+/**
  * Creates a folder node inside a transaction and touches project updatedAt (Blueprint Section 5.3 & 7.5)
  */
 export async function createFolder({ projectId, parentId, name, createdById }) {
@@ -116,4 +139,183 @@ export async function createFolder({ projectId, parentId, name, createdById }) {
 
     return folder;
   });
+}
+
+/**
+ * Creates a file node inside a transaction and touches project updatedAt (Endpoint #18)
+ */
+export async function createFile({ projectId, parentId, name, language, content = '', createdById }) {
+  const size = Buffer.byteLength(content, 'utf8');
+
+  return prisma.$transaction(async (tx) => {
+    const file = await tx.fileNode.create({
+      data: {
+        projectId,
+        parentId: parentId || null,
+        type: 'file',
+        name,
+        nameLower: name.toLowerCase(),
+        language,
+        content,
+        size,
+        createdById,
+        lastModifiedById: createdById,
+      },
+      select: {
+        id: true,
+        parentId: true,
+        type: true,
+        name: true,
+        language: true,
+        size: true,
+      },
+    });
+
+    await tx.project.update({
+      where: { id: projectId },
+      data: { updatedAt: new Date() },
+    });
+
+    return file;
+  });
+}
+
+/**
+ * Updates file content (Endpoint #20)
+ */
+export async function updateFileContent(fileId, projectId, content, modifiedById) {
+  const size = Buffer.byteLength(content, 'utf8');
+
+  return prisma.$transaction(async (tx) => {
+    const file = await tx.fileNode.update({
+      where: { id: fileId },
+      data: {
+        content,
+        size,
+        lastModifiedById: modifiedById,
+      },
+      select: {
+        id: true,
+        size: true,
+        updatedAt: true,
+      },
+    });
+
+    await tx.project.update({
+      where: { id: projectId },
+      data: { updatedAt: new Date() },
+    });
+
+    return file;
+  });
+}
+
+/**
+ * Renames a node (Endpoint #21)
+ */
+export async function renameNode(nodeId, projectId, name) {
+  return prisma.$transaction(async (tx) => {
+    const node = await tx.fileNode.update({
+      where: { id: nodeId },
+      data: {
+        name,
+        nameLower: name.toLowerCase(),
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    await tx.project.update({
+      where: { id: projectId },
+      data: { updatedAt: new Date() },
+    });
+
+    return node;
+  });
+}
+
+/**
+ * Moves a node to a new parent folder (Endpoint #22)
+ */
+export async function moveNode(nodeId, projectId, parentId) {
+  return prisma.$transaction(async (tx) => {
+    const node = await tx.fileNode.update({
+      where: { id: nodeId },
+      data: {
+        parentId: parentId || null,
+      },
+      select: {
+        id: true,
+        parentId: true,
+      },
+    });
+
+    await tx.project.update({
+      where: { id: projectId },
+      data: { updatedAt: new Date() },
+    });
+
+    return node;
+  });
+}
+
+/**
+ * Changes language of a file (Endpoint #23)
+ */
+export async function changeFileLanguage(fileId, projectId, language) {
+  return prisma.$transaction(async (tx) => {
+    const node = await tx.fileNode.update({
+      where: { id: fileId },
+      data: { language },
+      select: {
+        id: true,
+        language: true,
+      },
+    });
+
+    await tx.project.update({
+      where: { id: projectId },
+      data: { updatedAt: new Date() },
+    });
+
+    return node;
+  });
+}
+
+/**
+ * Recursively deletes a node and all its descendants (Endpoint #24)
+ * Returns array of deleted IDs
+ */
+export async function deleteNodeWithDescendants(nodeId, projectId) {
+  // Collect node and all its descendants
+  const deletedIds = [nodeId];
+
+  async function collectDescendantIds(currentId) {
+    const children = await prisma.fileNode.findMany({
+      where: { parentId: currentId },
+      select: { id: true },
+    });
+    for (const child of children) {
+      deletedIds.push(child.id);
+      await collectDescendantIds(child.id);
+    }
+  }
+
+  await collectDescendantIds(nodeId);
+
+  await prisma.$transaction(async (tx) => {
+    // Delete root node (foreign key ON DELETE CASCADE deletes children in Postgres)
+    await tx.fileNode.delete({
+      where: { id: nodeId },
+    });
+
+    await tx.project.update({
+      where: { id: projectId },
+      data: { updatedAt: new Date() },
+    });
+  });
+
+  return deletedIds;
 }

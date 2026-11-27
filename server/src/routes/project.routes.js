@@ -9,6 +9,13 @@ import {
 import {
   getTree,
   createFolder,
+  createFile,
+  getFileById,
+  updateFileContent,
+  renameNode,
+  moveNode,
+  changeFileLanguage,
+  deleteNode,
 } from '../controllers/node.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
@@ -22,6 +29,13 @@ import {
 import {
   getTreeSchema,
   createFolderSchema,
+  createFileSchema,
+  fileIdParamSchema,
+  updateContentSchema,
+  renameNodeSchema,
+  moveNodeSchema,
+  changeLanguageSchema,
+  nodeIdParamSchema,
 } from '../validators/node.schema.js';
 
 const router = Router();
@@ -46,5 +60,26 @@ router.get('/:projectId/tree', authenticate, validate(getTreeSchema), requireRol
 
 // Endpoint #17: POST /api/v1/projects/:projectId/folders (Editor+)
 router.post('/:projectId/folders', authenticate, validate(createFolderSchema), requireRole('editor'), createFolder);
+
+// Endpoint #18: POST /api/v1/projects/:projectId/files (Editor+)
+router.post('/:projectId/files', authenticate, validate(createFileSchema), requireRole('editor'), createFile);
+
+// Endpoint #19: GET /api/v1/projects/:projectId/files/:fileId (Viewer+)
+router.get('/:projectId/files/:fileId', authenticate, validate(fileIdParamSchema), requireRole('viewer'), getFileById);
+
+// Endpoint #20: PUT /api/v1/projects/:projectId/files/:fileId/content (Editor+)
+router.put('/:projectId/files/:fileId/content', authenticate, validate(updateContentSchema), requireRole('editor'), updateFileContent);
+
+// Endpoint #21: PATCH /api/v1/projects/:projectId/nodes/:nodeId (Editor+)
+router.patch('/:projectId/nodes/:nodeId', authenticate, validate(renameNodeSchema), requireRole('editor'), renameNode);
+
+// Endpoint #22: PATCH /api/v1/projects/:projectId/nodes/:nodeId/move (Editor+)
+router.patch('/:projectId/nodes/:nodeId/move', authenticate, validate(moveNodeSchema), requireRole('editor'), moveNode);
+
+// Endpoint #23: PATCH /api/v1/projects/:projectId/files/:fileId/language (Editor+)
+router.patch('/:projectId/files/:fileId/language', authenticate, validate(changeLanguageSchema), requireRole('editor'), changeFileLanguage);
+
+// Endpoint #24: DELETE /api/v1/projects/:projectId/nodes/:nodeId (Editor+)
+router.delete('/:projectId/nodes/:nodeId', authenticate, validate(nodeIdParamSchema), requireRole('editor'), deleteNode);
 
 export default router;
