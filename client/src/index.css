@@ -285,17 +285,50 @@ dialog::backdrop {
   background: rgba(255, 255, 255, 0.22);
 }
 
+/* Purposeful lift & reveal motion — static by default, animated only when user allows motion */
+.hover-lift {
+  transition:
+    background-color var(--duration-fast) ease-out,
+    border-color var(--duration-fast) ease-out,
+    box-shadow var(--duration-normal) ease-out;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hover-lift {
+    transition:
+      background-color var(--duration-fast) ease-out,
+      border-color var(--duration-fast) ease-out,
+      box-shadow var(--duration-normal) ease-out,
+      transform var(--duration-normal) var(--ease-standard);
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-2px);
+  }
+
+  .reveal-in {
+    animation: fade-slide-in var(--duration-panel) var(--ease-standard) both;
+  }
+}
+
+@keyframes fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html:has(.marketing-scroll) {
     scroll-behavior: auto;
   }
 
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+  .transition-mechanical,
+  .hover-lift {
+    transition-property: background-color, border-color, color, opacity;
   }
 }

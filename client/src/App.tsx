@@ -64,13 +64,7 @@ export default function App() {
           path="/login"
           element={
             <PublicOnlyRoute>
-              <AuthView
-                onAuthenticated={(account) => {
-                  pushToast(`Signed in as ${account.name}`, 'success');
-                  navigate('/dashboard');
-                }}
-                onBackToLanding={() => navigate('/')}
-              />
+              <AuthView initialMode="login" />
             </PublicOnlyRoute>
           }
         />
@@ -79,13 +73,7 @@ export default function App() {
           path="/register"
           element={
             <PublicOnlyRoute>
-              <AuthView
-                onAuthenticated={(account) => {
-                  pushToast(`Welcome, ${account.name}`, 'success');
-                  navigate('/dashboard');
-                }}
-                onBackToLanding={() => navigate('/')}
-              />
+              <AuthView initialMode="register" />
             </PublicOnlyRoute>
           }
         />
