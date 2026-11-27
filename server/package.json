@@ -1,0 +1,46 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@google/genai": "^3.6.1",
+    "@prisma/client": "^7.10.1",
+    "axios": "^1.21.1",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dockerode": "^5.0.1",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.5",
+    "helmet": "^8.3.0",
+    "isomorphic-git": "^1.44.19",
+    "jsonwebtoken": "^9.0.3",
+    "lru-cache": "^11.5.3",
+    "morgan": "^1.12.1",
+    "nanoid": "^6.0.2",
+    "node-cron": "^4.6.0",
+    "socket.io": "^4.8.4",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.33",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.11",
+    "prisma": "^8.0.0-rc.36",
+    "supertest": "^7.3.2",
+    "testcontainers": "^10.10.4"
+  }
+}
