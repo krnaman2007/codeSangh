@@ -6,6 +6,10 @@ import {
   renameProject,
   deleteProject,
 } from '../controllers/project.controller.js';
+import {
+  getTree,
+  createFolder,
+} from '../controllers/node.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
 import { requireRole } from '../middleware/projectAccess.js';
@@ -15,6 +19,10 @@ import {
   projectIdParamSchema,
   renameProjectSchema,
 } from '../validators/project.schema.js';
+import {
+  getTreeSchema,
+  createFolderSchema,
+} from '../validators/node.schema.js';
 
 const router = Router();
 
@@ -32,5 +40,11 @@ router.patch('/:projectId', authenticate, validate(renameProjectSchema), require
 
 // Endpoint #15: DELETE /api/v1/projects/:projectId (Owner)
 router.delete('/:projectId', authenticate, validate(projectIdParamSchema), requireRole('owner'), deleteProject);
+
+// Endpoint #16: GET /api/v1/projects/:projectId/tree (Viewer+)
+router.get('/:projectId/tree', authenticate, validate(getTreeSchema), requireRole('viewer'), getTree);
+
+// Endpoint #17: POST /api/v1/projects/:projectId/folders (Editor+)
+router.post('/:projectId/folders', authenticate, validate(createFolderSchema), requireRole('editor'), createFolder);
 
 export default router;
