@@ -1,0 +1,14 @@
+// server/prisma/schema.prisma
+// DevSync Database Connection Setup (Neon + Prisma)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Models/schemas are omitted for now as requested
