@@ -11,10 +11,11 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// 5.1 users (Blueprint Section 5.1)
 model User {
   id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name         String    @db.VarChar(50)
-  email        String    @unique @db.VarChar(254)
+  email        String    @unique @db.VarChar(254) // lowercase in zod: .toLowerCase()
   passwordHash String    @map("password_hash")
   avatarColor  String    @map("avatar_color") @db.VarChar(7)
   preferences  Json      @default("{\"aiSuggestions\":true,\"suggestionDelayMs\":400}")
@@ -22,5 +23,26 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
+  sessions     Session[]
+
   @@map("users")
+}
+
+// 5.2 sessions / refresh tokens (Blueprint Section 5.2)
+model Session {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.Char(64)
+  userAgent  String?   @map("user_agent")
+  ip         String?   // was INET
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
 }
