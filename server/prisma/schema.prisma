@@ -39,6 +39,7 @@ model User {
   invitesSent   ProjectMember[] @relation("MemberInviter")
   nodesCreated  FileNode[]      @relation("NodeCreator")
   nodesModified FileNode[]      @relation("NodeModifier")
+  executions    Execution[]     @relation("UserExecutions")
 
   @@map("users")
 }
@@ -64,16 +65,17 @@ model Session {
 
 // 5.3 projects (Blueprint Section 5.3)
 model Project {
-  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name      String          @db.VarChar(100)
-  nameLower String          @map("name_lower") @db.VarChar(100) // set in repository: name.toLowerCase()
-  ownerId   String          @map("owner_id") @db.Uuid
-  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+  id         String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String          @db.VarChar(100)
+  nameLower  String          @map("name_lower") @db.VarChar(100) // set in repository: name.toLowerCase()
+  ownerId    String          @map("owner_id") @db.Uuid
+  createdAt  DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 
-  owner     User            @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  members   ProjectMember[]
-  nodes     FileNode[]
+  owner      User            @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members    ProjectMember[]
+  nodes      FileNode[]
+  executions Execution[]
 
   @@unique([ownerId, nameLower])
   @@index([ownerId])
@@ -121,8 +123,32 @@ model FileNode {
   children         FileNode[]  @relation("NodeTree")
   createdBy        User?       @relation("NodeCreator", fields: [createdById], references: [id], onDelete: SetNull)
   lastModifiedBy   User?       @relation("NodeModifier", fields: [lastModifiedById], references: [id], onDelete: SetNull)
+  executions       Execution[]
 
   @@index([projectId])
   @@index([parentId])
   @@map("file_nodes")
+}
+
+// 5.6 executions (Blueprint Section 5.6)
+model Execution {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId     String    @map("project_id") @db.Uuid
+  fileId        String?   @map("file_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  language      String    @db.VarChar(20)
+  status        String    @db.VarChar(50) // 'success' | 'error' | 'timeout' | 'compilation_error'
+  stdout        String?
+  stderr        String?
+  compileOutput String?   @map("compile_output")
+  time          Float?
+  memory        Int?
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  file          FileNode? @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  user          User      @relation("UserExecutions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt(sort: Desc)])
+  @@map("executions")
 }

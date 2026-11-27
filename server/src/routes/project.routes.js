@@ -23,6 +23,12 @@ import {
   updateCollaborator,
   removeCollaborator,
 } from '../controllers/collaborator.controller.js';
+import {
+  runFile,
+  getExecutions,
+  getExecution,
+  clearExecutions,
+} from '../controllers/execution.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
 import { requireRole } from '../middleware/projectAccess.js';
@@ -49,6 +55,11 @@ import {
   updateCollaboratorRoleSchema,
   collaboratorMemberParamsSchema,
 } from '../validators/collaborator.schema.js';
+import {
+  runFileSchema,
+  listExecutionsSchema,
+  executionParamsSchema,
+} from '../validators/execution.schema.js';
 
 const router = Router();
 
@@ -128,6 +139,42 @@ router.delete(
   validate(collaboratorMemberParamsSchema),
   requireRole('viewer'),
   removeCollaborator
+);
+
+// Endpoint #29: POST /api/v1/projects/:projectId/files/:fileId/run (Editor+)
+router.post(
+  '/:projectId/files/:fileId/run',
+  authenticate,
+  validate(runFileSchema),
+  requireRole('editor'),
+  runFile
+);
+
+// Endpoint #30: GET /api/v1/projects/:projectId/executions (Viewer+)
+router.get(
+  '/:projectId/executions',
+  authenticate,
+  validate(listExecutionsSchema),
+  requireRole('viewer'),
+  getExecutions
+);
+
+// Endpoint #31: GET /api/v1/projects/:projectId/executions/:executionId (Viewer+)
+router.get(
+  '/:projectId/executions/:executionId',
+  authenticate,
+  validate(executionParamsSchema),
+  requireRole('viewer'),
+  getExecution
+);
+
+// Endpoint #32: DELETE /api/v1/projects/:projectId/executions (Owner)
+router.delete(
+  '/:projectId/executions',
+  authenticate,
+  validate(collaboratorProjectParamSchema),
+  requireRole('owner'),
+  clearExecutions
 );
 
 export default router;

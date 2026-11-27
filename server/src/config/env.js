@@ -20,6 +20,11 @@ const env = {
   JWT_ACCESS_EXPIRES: process.env.JWT_ACCESS_EXPIRES || '15m',
   REFRESH_TOKEN_DAYS: parseInt(process.env.REFRESH_TOKEN_DAYS, 10) || 7,
   BCRYPT_ROUNDS: parseInt(process.env.BCRYPT_ROUNDS, 10) || 12,
+
+  // Judge0 Code Execution Configuration (Blueprint Section 4.1 & 8.0)
+  JUDGE0_API_URL: process.env.JUDGE0_API_URL || 'https://judge0-ce.p.rapidapi.com',
+  JUDGE0_API_KEY: process.env.JUDGE0_API_KEY || '',
+  JUDGE0_API_HOST: process.env.JUDGE0_API_HOST || 'judge0-ce.p.rapidapi.com',
 };
 
 export default env;
