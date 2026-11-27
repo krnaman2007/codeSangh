@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import git from 'isomorphic-git';
+import http from 'isomorphic-git/http/node';
 import ApiError from '../utils/ApiError.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -148,5 +149,158 @@ export async function initGitRepository({
   } catch (err) {
     if (err instanceof ApiError) throw err;
     throw new ApiError(500, 'GIT_INIT_FAILED', `Failed to initialize git repository: ${err.message}`);
+  }
+}
+
+/**
+ * Sets remote URL and credentials for project repository (Endpoint #40 - Mastermind M2)
+ */
+export async function setGitRemote({ projectId, url, token, name = 'origin' }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  try {
+    // Remove existing remote if already configured
+    try {
+      await git.deleteRemote({ fs, dir, remote: name });
+    } catch {
+      // Remote didn't exist yet, ignore
+    }
+
+    // Add new remote
+    await git.addRemote({
+      fs,
+      dir,
+      remote: name,
+      url,
+    });
+
+    // Save auth token in secure project git config if provided
+    if (token) {
+      const authFile = path.join(dir, '.git', 'devsync-auth.json');
+      await fs.promises.writeFile(authFile, JSON.stringify({ token }), 'utf8');
+    }
+
+    return {
+      name,
+      url,
+      hasToken: Boolean(token),
+    };
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(500, 'GIT_REMOTE_FAILED', `Failed to configure git remote: ${err.message}`);
+  }
+}
+
+/**
+ * Connects and clones an existing remote repository (Endpoint #41 - Mastermind M2)
+ */
+export async function cloneGitRepository({ projectId, url, token, branch = 'main' }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (isGitInitialized(projectId)) {
+    throw new ApiError(409, 'ALREADY_INITIALIZED', 'Git repository is already initialized for this project');
+  }
+
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+
+    // Perform actual Git clone
+    await git.clone({
+      fs,
+      http,
+      dir,
+      url,
+      ref: branch,
+      singleBranch: true,
+      depth: 10,
+      onAuth: () => (token ? { username: token } : undefined),
+    });
+
+    // Save token if private repo credentials were used
+    if (token) {
+      const authFile = path.join(dir, '.git', 'devsync-auth.json');
+      await fs.promises.writeFile(authFile, JSON.stringify({ token }), 'utf8');
+    }
+
+    return {
+      initialized: true,
+      branch,
+      remote: url,
+      dir,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(500, 'GIT_CLONE_FAILED', `Failed to clone repository: ${err.message}`);
+  }
+}
+
+/**
+ * Gets real changed files status from Git working directory (Endpoint #42 - Mastermind M2)
+ */
+export async function getGitStatus(projectId) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  try {
+    const currentBranch = await git.currentBranch({ fs, dir });
+    const matrix = await git.statusMatrix({ fs, dir });
+
+    const staged = [];
+    const modified = [];
+    const untracked = [];
+    const deleted = [];
+
+    for (const row of matrix) {
+      const [filepath, head, workdir, stage] = row;
+
+      // Skip .git folder itself
+      if (filepath.startsWith('.git/')) continue;
+
+      // Untracked: not in HEAD, in WORKDIR, not in index
+      if (head === 0 && workdir === 2 && stage === 0) {
+        untracked.push(filepath);
+      }
+      // Staged new: not in HEAD, in WORKDIR, in index
+      else if (head === 0 && workdir === 2 && stage === 2) {
+        staged.push(filepath);
+      }
+      // Modified workdir: in HEAD, in WORKDIR, workdir != stage
+      else if (head === 1 && workdir === 2 && stage === 1) {
+        modified.push(filepath);
+      }
+      // Staged modified: in HEAD, in WORKDIR, workdir == stage, stage != head
+      else if (head === 1 && workdir === 2 && stage === 2) {
+        staged.push(filepath);
+      }
+      // Deleted from workdir: in HEAD, workdir == 0
+      else if (head === 1 && workdir === 0) {
+        deleted.push(filepath);
+      }
+    }
+
+    const clean =
+      staged.length === 0 &&
+      modified.length === 0 &&
+      untracked.length === 0 &&
+      deleted.length === 0;
+
+    return {
+      clean,
+      branch: currentBranch || 'main',
+      staged,
+      modified,
+      untracked,
+      deleted,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(500, 'GIT_STATUS_FAILED', `Failed to get git status: ${err.message}`);
   }
 }
