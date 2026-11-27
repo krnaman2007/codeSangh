@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
+  Bug,
   Check,
+  Container,
+  FolderTree,
+  GitBranch,
   Loader2,
   LogOut,
   PanelLeftClose,
@@ -12,29 +16,40 @@ import {
   RefreshCw,
   Search,
   Share2,
+  Sparkles,
   Wifi,
   WifiOff,
 } from 'lucide-react';
 import { ApiClientError } from '../api/errors';
 import type { ApiExecutionRecord } from '../api/types';
-import { useLeaveProjectMutation, useProjectsQuery, useProjectDetailsQuery, useRenameProjectMutation } from '../hooks/useProjects';
-import { useFileDetailQuery, useLanguagesQuery, useNodeMutations, useProjectTreeQuery } from '../hooks/useProjectNodes';
+import { featureFlags } from '../config/features';
+import { useActiveDebugSessionQuery, useBreakpointsQuery, useDebugMutations } from '../hooks/useDebugAndGit';
 import { useRunFileMutation } from '../hooks/useExecutions';
 import { usePermissions } from '../hooks/usePermissions';
+import { useFileDetailQuery, useLanguagesQuery, useNodeMutations, useProjectTreeQuery } from '../hooks/useProjectNodes';
+import { useLeaveProjectMutation, useProjectDetailsQuery, useProjectsQuery, useRenameProjectMutation } from '../hooks/useProjects';
 import { useRealtimeWorkspace } from '../hooks/useRealtimeWorkspace';
 import { getInitials, useAuth } from '../state/authStore';
-import { getNodeBreadcrumb, getSortedChildren } from '../utils/fileTree';
-import { detectPlatform, matchWorkspaceShortcut } from '../utils/shortcuts';
 import { useUiStore } from '../state/uiStore';
 import type { FileNode, Project, SupportedLanguage } from '../types/devsync';
+import { getNodeBreadcrumb, getSortedChildren } from '../utils/fileTree';
+import { detectPlatform, matchWorkspaceShortcut } from '../utils/shortcuts';
 import { BrandLogo } from './BrandMark';
-import { FileExplorer } from './FileExplorer';
-import { MonacoCodeEditor, type FileSaveState, type MonacoModelBindingContext, type OpenEditorFile } from './MonacoCodeEditor';
-import { ExecutionPanel, type WorkspaceBottomTab } from './ExecutionPanel';
 import { CollaboratorsDialog } from './CollaboratorsDialog';
 import { CommandPalette } from './CommandPalette';
+import { ExecutionPanel, type WorkspaceBottomTab } from './ExecutionPanel';
+import { FileExplorer } from './FileExplorer';
+import { MonacoCodeEditor, type FileSaveState, type MonacoModelBindingContext, type OpenEditorFile } from './MonacoCodeEditor';
 import { ProjectErrorState } from './ProjectErrorState';
 import { Dialog, GlassButton, GlassPanel, RoleChip, Skeleton, StatusChip, Tooltip } from './ui';
+import { AiAssistantPanel } from './workspace/AiAssistantPanel';
+import { DebugPanel } from './workspace/DebugPanel';
+import { EnvironmentPanel } from './workspace/EnvironmentPanel';
+import { GitPanel } from './workspace/GitPanel';
+import { VoiceControl } from './workspace/VoiceControl';
+import { XtermTerminalPanel } from './workspace/XtermTerminalPanel';
+
+type SideRailPanel = 'explorer' | 'git' | 'debug' | 'env' | 'ai';
 
 export function WorkspacePage() {
   const { projectId = '' } = useParams<{ projectId: string }>();
@@ -51,6 +66,7 @@ export function WorkspacePage() {
   const nodeMutations = useNodeMutations(projectId);
   const runFileMutation = useRunFileMutation(projectId);
 
+  const [activeSidePanel, setActiveSidePanel] = useState<SideRailPanel>('explorer');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [bottomTab, setBottomTab] = useState<WorkspaceBottomTab>('output');
   const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
@@ -64,8 +80,10 @@ export function WorkspacePage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const [accessRevoked, setAccessRevoked] = useState(false);
+  const [inlineSuggestionsEnabled, setInlineSuggestionsEnabled] = useState(() =>
+    Boolean((user?.preferences as { aiSuggestions?: boolean } | undefined)?.aiSuggestions ?? true)
+  );
 
-  // Explorer focus & shortcut triggers
   const [explorerFocused, setExplorerFocused] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [createFileTrigger, setCreateFileTrigger] = useState(0);
@@ -73,7 +91,6 @@ export function WorkspacePage() {
   const [renameTrigger, setRenameTrigger] = useState(0);
   const [deleteTrigger, setDeleteTrigger] = useState(0);
 
-  // Inline project title rename (Owner only)
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
 
@@ -82,6 +99,9 @@ export function WorkspacePage() {
   draftsRef.current = drafts;
 
   const activeFileDetailQuery = useFileDetailQuery(projectId, activeFileId);
+  const breakpointsQuery = useBreakpointsQuery(projectId, activeFileId, featureFlags.debug);
+  const activeDebugQuery = useActiveDebugSessionQuery(projectId, featureFlags.debug);
+  const debugMutations = useDebugMutations(projectId);
 
   useEffect(() => {
     setOpenTabIds([]);
@@ -334,7 +354,37 @@ export function WorkspacePage() {
     stdin,
   ]);
 
-  // Global cross-platform workspace keyboard shortcuts
+  const activeBreakpointLines = useMemo(
+    () => (breakpointsQuery.data?.breakpoints ?? []).map((b) => b.line),
+    [breakpointsQuery.data?.breakpoints]
+  );
+
+  const handleToggleBreakpoint = useCallback(
+    async (fileId: string, line: number) => {
+      if (!perms.canDebug) {
+        pushToast('Breakpoint blocked', 'info', perms.denialReason('debug'));
+        return;
+      }
+      const current = activeBreakpointLines;
+      const exists = current.includes(line);
+      const next = exists
+        ? current.filter((l) => l !== line)
+        : [...current, line].sort((a, b) => a - b);
+
+      try {
+        await debugMutations.replaceBreakpoints.mutateAsync({
+          fileId,
+          breakpoints: next,
+        });
+      } catch (err) {
+        const msg =
+          err instanceof ApiClientError ? err.userMessage : 'Could not update breakpoints.';
+        pushToast('Breakpoint error', 'error', msg);
+      }
+    },
+    [activeBreakpointLines, debugMutations.replaceBreakpoints, perms, pushToast]
+  );
+
   useEffect(() => {
     const platform = detectPlatform();
     const onKeyDown = (e: KeyboardEvent) => {
@@ -513,6 +563,19 @@ export function WorkspacePage() {
     activeLanguageMode === 'none' ||
     runFileMutation.isPending;
 
+  const railItems: Array<{
+    id: SideRailPanel;
+    label: string;
+    icon: typeof FolderTree;
+    enabled: boolean;
+  }> = [
+    { id: 'explorer', label: 'Explorer', icon: FolderTree, enabled: true },
+    { id: 'git', label: 'Source Control', icon: GitBranch, enabled: featureFlags.git },
+    { id: 'debug', label: 'Debug', icon: Bug, enabled: featureFlags.debug },
+    { id: 'env', label: 'Environment', icon: Container, enabled: featureFlags.environment },
+    { id: 'ai', label: 'AI Assistant', icon: Sparkles, enabled: featureFlags.aiAssistant },
+  ];
+
   const paletteProjects: Project[] = [
     ...(dashboardQuery.data?.owned ?? []).map((p) => ({
       id: p.id,
@@ -571,8 +634,8 @@ export function WorkspacePage() {
           <button
             type="button"
             onClick={() => setSidebarOpen((prev) => !prev)}
-            aria-label={sidebarOpen ? 'Hide Explorer' : 'Show Explorer'}
-            title="Toggle Explorer (⌘B / Ctrl+B)"
+            aria-label={sidebarOpen ? 'Hide side panel' : 'Show side panel'}
+            title="Toggle Side Panel (⌘B / Ctrl+B)"
             className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-mechanical cursor-pointer"
           >
             {sidebarOpen ? (
@@ -623,8 +686,12 @@ export function WorkspacePage() {
                 setTitleDraft(projectName);
                 setEditingTitle(true);
               }}
-              title={perms.canRenameProject ? 'Click to rename project' : perms.denialReason('renameProject')}
-              className={`group inline-flex items-center gap-1.5 text-[13px] font-semibold text-[var(--text-primary)] truncate max-w-[180px] ${
+              title={
+                perms.canRenameProject
+                  ? 'Click to rename project'
+                  : perms.denialReason('renameProject')
+              }
+              className={`group inline-flex items-center gap-1.5 text-[13px] font-semibold text-[var(--text-primary)] truncate max-w-[160px] ${
                 perms.canRenameProject ? 'hover:text-white cursor-pointer' : 'cursor-default'
               }`}
             >
@@ -661,11 +728,10 @@ export function WorkspacePage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
-          {/* Realtime Presence Avatars */}
+        <div className="flex items-center gap-2 shrink-0">
           {realtime.participants.length > 0 && (
             <div
-              className="hidden md:flex items-center -space-x-1.5 mr-1"
+              className="hidden lg:flex items-center -space-x-1.5 mr-1"
               aria-label={`${realtime.participants.length} collaborators online`}
             >
               {realtime.participants.slice(0, 4).map((p) => (
@@ -678,20 +744,15 @@ export function WorkspacePage() {
                   <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-[var(--state-success)] ring-1 ring-[var(--surface-canvas)]" />
                 </div>
               ))}
-              {realtime.participants.length > 4 && (
-                <span className="pl-2.5 text-[11px] font-mono text-[var(--text-secondary)]">
-                  +{realtime.participants.length - 4}
-                </span>
-              )}
             </div>
           )}
 
-          {/* Connection / Sync State Indicator */}
           <StatusChip
             tone={
               realtime.connectionState === 'connected'
                 ? 'success'
-                : realtime.connectionState === 'reconnecting' || realtime.connectionState === 'connecting'
+                : realtime.connectionState === 'reconnecting' ||
+                  realtime.connectionState === 'connecting'
                 ? 'warning'
                 : realtime.connectionState === 'offline'
                 ? 'danger'
@@ -701,17 +762,14 @@ export function WorkspacePage() {
             {realtime.connectionState === 'connected' ? (
               <>
                 <Wifi className="w-3 h-3" strokeWidth={1.75} />
-                <span>Live · {Math.max(1, realtime.participants.length)} online</span>
+                <span className="hidden sm:inline">
+                  Live · {Math.max(1, realtime.participants.length)} online
+                </span>
               </>
             ) : realtime.connectionState === 'offline' ? (
               <>
                 <WifiOff className="w-3 h-3" strokeWidth={1.75} />
-                <span>
-                  Offline
-                  {realtime.offlineQueuedEdits > 0
-                    ? ` (${realtime.offlineQueuedEdits} local)`
-                    : ''}
-                </span>
+                <span>Offline</span>
               </>
             ) : realtime.connectionState === 'reconnecting' ? (
               <>
@@ -719,9 +777,17 @@ export function WorkspacePage() {
                 <span>Reconnecting…</span>
               </>
             ) : (
-              <span>REST Sync</span>
+              <span className="hidden sm:inline">REST Sync</span>
             )}
           </StatusChip>
+
+          {featureFlags.voice && (
+            <VoiceControl
+              projectId={projectId}
+              socket={realtime.socketRef.current}
+              socketConnected={realtime.connectionState === 'connected'}
+            />
+          )}
 
           <RoleChip role={role} />
 
@@ -758,7 +824,6 @@ export function WorkspacePage() {
             </GlassButton>
           </Tooltip>
 
-          {/* Owner-only Share action (hidden for non-owners per delivery plan) */}
           {perms.canShareProject ? (
             <GlassButton variant="glass" size="sm" onClick={() => setShareOpen(true)}>
               <Share2 className="w-3.5 h-3.5 text-[var(--text-secondary)]" strokeWidth={1.5} />
@@ -780,7 +845,45 @@ export function WorkspacePage() {
 
       {/* Main IDE Body */}
       <div className="flex-1 min-h-0 flex overflow-hidden">
-        {sidebarOpen && (
+        {/* Activity Rail */}
+        <nav
+          aria-label="Workspace tools"
+          className="w-11 shrink-0 bg-[var(--surface-canvas)] border-r border-[var(--border-hairline)] py-2.5 flex flex-col items-center gap-1.5"
+        >
+          {railItems
+            .filter((item) => item.enabled)
+            .map((item) => {
+              const Icon = item.icon;
+              const isActive = sidebarOpen && activeSidePanel === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-label={item.label}
+                  aria-pressed={isActive}
+                  title={item.label}
+                  onClick={() => {
+                    if (isActive) {
+                      setSidebarOpen(false);
+                    } else {
+                      setActiveSidePanel(item.id);
+                      setSidebarOpen(true);
+                    }
+                  }}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-mechanical cursor-pointer ${
+                    isActive
+                      ? 'bg-[var(--accent-soft)] text-[#c7d2fe] border border-[var(--accent-primary)]/40'
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" strokeWidth={1.5} />
+                </button>
+              );
+            })}
+        </nav>
+
+        {/* Active Side Panel */}
+        {sidebarOpen && activeSidePanel === 'explorer' && (
           <FileExplorer
             nodes={treeNodes}
             languages={languages}
@@ -887,6 +990,66 @@ export function WorkspacePage() {
           />
         )}
 
+        {sidebarOpen && activeSidePanel === 'git' && (
+          <aside className="w-[272px] shrink-0 border-r border-[var(--border-hairline)] flex flex-col overflow-hidden">
+            <GitPanel projectId={projectId} permissions={perms} />
+          </aside>
+        )}
+
+        {sidebarOpen && activeSidePanel === 'debug' && (
+          <aside className="w-[272px] shrink-0 border-r border-[var(--border-hairline)] flex flex-col overflow-hidden">
+            <DebugPanel
+              projectId={projectId}
+              activeFile={
+                activeEditorFile
+                  ? {
+                      id: activeEditorFile.id,
+                      name: activeEditorFile.name,
+                      language: activeEditorFile.language,
+                    }
+                  : null
+              }
+              breakpoints={activeBreakpointLines}
+              onToggleBreakpoint={(line) => {
+                if (activeFileId) void handleToggleBreakpoint(activeFileId, line);
+              }}
+              permissions={perms}
+            />
+          </aside>
+        )}
+
+        {sidebarOpen && activeSidePanel === 'env' && (
+          <aside className="w-[272px] shrink-0 border-r border-[var(--border-hairline)] flex flex-col overflow-hidden">
+            <EnvironmentPanel nodes={treeNodes} permissions={perms} />
+          </aside>
+        )}
+
+        {sidebarOpen && activeSidePanel === 'ai' && (
+          <aside className="w-[300px] shrink-0 border-r border-[var(--border-hairline)] flex flex-col overflow-hidden">
+            <AiAssistantPanel
+              activeFile={
+                activeEditorFile
+                  ? {
+                      id: activeEditorFile.id,
+                      name: activeEditorFile.name,
+                      language: activeEditorFile.language,
+                      content: activeEditorFile.content,
+                    }
+                  : null
+              }
+              latestExecution={latestExecution}
+              permissions={perms}
+              inlineSuggestionsEnabled={inlineSuggestionsEnabled}
+              onToggleInlineSuggestions={setInlineSuggestionsEnabled}
+              onApplyCodeToActiveFile={(fileId, nextContent) => {
+                handleContentEdit(fileId, nextContent);
+                void saveFileNow(fileId);
+              }}
+            />
+          </aside>
+        )}
+
+        {/* Editor + Bottom Execution & Xterm Panel */}
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           <MonacoCodeEditor
             openFiles={openEditorFiles}
@@ -899,7 +1062,15 @@ export function WorkspacePage() {
             onChangeContent={handleContentEdit}
             onSaveFile={(fileId) => void saveFileNow(fileId)}
             onModelAttached={handleModelAttached}
+            onGutterMouseDown={(fileId, line) => void handleToggleBreakpoint(fileId, line)}
+            breakpoints={activeBreakpointLines}
+            activeDebugLine={
+              activeDebugQuery.data?.session?.fileId === activeFileId
+                ? activeDebugQuery.data.session.currentLine
+                : null
+            }
             yjsManagedFileIds={yjsManagedFileIds}
+            inlineSuggestionsEnabled={inlineSuggestionsEnabled}
             onChangeLanguage={(fileId, language) => {
               void nodeMutations.changeLanguage
                 .mutateAsync({ fileId, language })
@@ -935,12 +1106,22 @@ export function WorkspacePage() {
               stdin={stdin}
               onStdinChange={setStdin}
               onOpenFile={openFile}
+              terminalSlot={
+                <XtermTerminalPanel
+                  projectId={projectId}
+                  projectName={projectName}
+                  nodes={treeNodes}
+                  userName={user?.name ?? 'Developer'}
+                  permissions={perms}
+                  socket={realtime.socketRef.current}
+                  socketConnected={realtime.connectionState === 'connected'}
+                />
+              }
             />
           )}
         </div>
       </div>
 
-      {/* Owner-only Collaborators / Sharing Dialog */}
       {perms.canShareProject && (
         <CollaboratorsDialog
           open={shareOpen}
@@ -951,7 +1132,6 @@ export function WorkspacePage() {
         />
       )}
 
-      {/* Non-owner Leave Project Confirmation */}
       <Dialog
         open={leaveConfirmOpen}
         onClose={() => setLeaveConfirmOpen(false)}

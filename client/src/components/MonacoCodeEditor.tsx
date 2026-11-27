@@ -100,6 +100,7 @@ interface MonacoCodeEditorProps {
   breakpoints?: number[];
   activeDebugLine?: number | null;
   yjsManagedFileIds?: Set<string>;
+  inlineSuggestionsEnabled?: boolean;
 }
 
 function resolveMonacoLanguage(
@@ -128,6 +129,7 @@ export function MonacoCodeEditor({
   breakpoints = [],
   activeDebugLine = null,
   yjsManagedFileIds,
+  inlineSuggestionsEnabled = false,
 }: MonacoCodeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -217,10 +219,54 @@ export function MonacoCodeEditor({
     };
   }, []);
 
-  // Sync readOnly option when role permissions change
+  // Sync readOnly & inline suggestions options when permissions or preferences change
   useEffect(() => {
-    editorRef.current?.updateOptions({ readOnly: !canEditCode });
-  }, [canEditCode]);
+    editorRef.current?.updateOptions({
+      readOnly: !canEditCode,
+      inlineSuggest: { enabled: inlineSuggestionsEnabled && canEditCode },
+    });
+  }, [canEditCode, inlineSuggestionsEnabled]);
+
+  // Register lightweight context-aware inline ghost suggestions provider when enabled
+  useEffect(() => {
+    if (!inlineSuggestionsEnabled || !canEditCode) return;
+
+    const disposable = monaco.languages.registerInlineCompletionsProvider(
+      ['javascript', 'typescript', 'python', 'java', 'cpp'],
+      {
+        provideInlineCompletions(model, position) {
+          const line = model.getLineContent(position.lineNumber).trimEnd();
+          let suggestion = '';
+          if (line.endsWith('console.log(')) {
+            suggestion = '"DevSync ready");';
+          } else if (line.endsWith('def ') || line.endsWith('function ')) {
+            suggestion = 'solve(items) {';
+          } else if (line.endsWith('print(')) {
+            suggestion = 'f"Result: {result}")';
+          }
+          if (!suggestion) {
+            return { items: [] };
+          }
+          return {
+            items: [
+              {
+                insertText: suggestion,
+                range: new monaco.Range(
+                  position.lineNumber,
+                  position.column,
+                  position.lineNumber,
+                  position.column
+                ),
+              },
+            ],
+          };
+        },
+        disposeInlineCompletions() {},
+      }
+    );
+
+    return () => disposable.dispose();
+  }, [inlineSuggestionsEnabled, canEditCode]);
 
   // Dispose models for closed tabs
   useEffect(() => {
