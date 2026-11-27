@@ -1,522 +1,133 @@
-import { useCallback, useEffect, useState } from 'react';
-import type {
-  AppView,
-  CollaboratorAccess,
-  ExecutionRecord,
-  Project,
-  Role,
-  SupportedLanguage,
-  ToastMessage,
-  UserAccount,
-} from './types/devsync';
-import { DEMO_USER, createSeedProjects } from './data/seedProjects';
-import {
-  createFileNode,
-  createFolderNode,
-  deleteFileNode,
-  moveFileNode,
-  renameFileNode,
-} from './utils/fileTree';
-import { getPermissionsForRole } from './utils/permissions';
+import { useEffect } from 'react';
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { LandingPage } from './components/LandingPage';
 import { AuthView } from './components/AuthView';
-import { Dashboard } from './components/Dashboard';
-import { Workspace } from './components/Workspace';
-import { CommandPalette } from './components/CommandPalette';
+import { NotFoundPage } from './components/NotFoundPage';
+import { DemoWorkspaceShell } from './components/DemoWorkspaceShell';
 import { ToastContainer } from './components/BrandMark';
+import { ProtectedRoute, PublicOnlyRoute } from './routes/guards';
+import { getInitials, useAuth } from './state/authStore';
+import { useUiStore } from './state/uiStore';
 
-const STORAGE_PROJECTS_KEY = 'devsync_projects_v1';
-const STORAGE_USER_KEY = 'devsync_user_v1';
+const ROUTE_TITLES: Record<string, string> = {
+  '/': 'DevSync — Collaborative Browser IDE',
+  '/login': 'Sign In | DevSync',
+  '/register': 'Create Account | DevSync',
+  '/dashboard': 'Dashboard | DevSync',
+  '/demo': 'Live Demo Workspace | DevSync',
+};
 
-function loadInitialProjects(): Project[] {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_PROJECTS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Project[];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+function DocumentTitleManager() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    if (pathname.startsWith('/project/')) {
+      document.title = 'Workspace | DevSync';
+      return;
     }
-  } catch {
-    // Fallback to deterministic seed data
-  }
-  return createSeedProjects();
-}
+    document.title = ROUTE_TITLES[pathname] ?? 'Page Not Found | DevSync';
+  }, [pathname]);
 
-function loadInitialUser(): UserAccount | null {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_USER_KEY);
-    if (raw) {
-      return JSON.parse(raw) as UserAccount;
-    }
-  } catch {
-    return null;
-  }
   return null;
 }
 
 export default function App() {
-  const [projects, setProjects] = useState<Project[]>(loadInitialProjects);
-  const [user, setUser] = useState<UserAccount | null>(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('autostart') === '1') return DEMO_USER;
-    return loadInitialUser();
-  });
-  const [view, setView] = useState<AppView>(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('autostart') === '1') return 'workspace';
-    return loadInitialUser() ? 'dashboard' : 'landing';
-  });
-  const [activeProjectId, setActiveProjectId] = useState<string>(() => {
-    const initial = loadInitialProjects();
-    return initial[0]?.id ?? 'proj-algolab';
-  });
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [workspaceAction, setWorkspaceAction] = useState<{
-    type: 'run' | 'new-file' | 'new-folder' | 'share' | 'cursors' | 'select-file';
-    fileId?: string;
-    nonce: number;
-  } | null>(null);
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const { toasts, dismissToast, pushToast } = useUiStore();
 
-  // Persist projects and user session
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify(projects));
-    } catch {
-      // Ignore storage quota errors
-    }
-  }, [projects]);
-
-  useEffect(() => {
-    try {
-      if (user) {
-        window.localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
-      } else {
-        window.localStorage.removeItem(STORAGE_USER_KEY);
+  const currentAccount = user
+    ? {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        initials: getInitials(user.name),
       }
-    } catch {
-      // Ignore
-    }
-  }, [user]);
-
-  const pushToast = useCallback(
-    (title: string, variant: ToastMessage['variant'] = 'info', description?: string) => {
-      const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      setToasts((prev) => [...prev.slice(-2), { id, title, description, variant }]);
-      window.setTimeout(() => {
-        setToasts((prev) => prev.filter((t) => t.id !== id));
-      }, 3600);
-    },
-    []
-  );
-
-  // Global Cmd+K / Ctrl+K shortcut for Command Palette
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        if (view === 'dashboard' || view === 'workspace') {
-          e.preventDefault();
-          setPaletteOpen((prev) => !prev);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [view]);
-
-  const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
-
-  const handleAuthenticated = (account: UserAccount) => {
-    setUser(account);
-    setView('dashboard');
-    pushToast(`Signed in as ${account.name}`, 'success');
-  };
-
-  const handleOpenDemoWorkspace = () => {
-    const activeUser = user ?? DEMO_USER;
-    setUser(activeUser);
-    const targetId = projects[0]?.id ?? 'proj-algolab';
-    setActiveProjectId(targetId);
-    setView('workspace');
-  };
-
-  const handleSignOut = () => {
-    setUser(null);
-    setView('landing');
-    pushToast('Signed out', 'info');
-  };
-
-  const handleOpenProject = (projectId: string) => {
-    const now = new Date().toISOString();
-    setProjects((prev) =>
-      prev.map((p) => (p.id === projectId ? { ...p, lastOpenedAt: now } : p))
-    );
-    setActiveProjectId(projectId);
-    setView('workspace');
-  };
-
-  const handleCreateProject = (name: string): { error?: string; projectId?: string } => {
-    const trimmed = name.trim();
-    if (!trimmed) return { error: 'Project name is required.' };
-    if (projects.some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) {
-      return { error: `A project named "${trimmed}" already exists.` };
-    }
-    const owner = user ?? DEMO_USER;
-    const now = new Date().toISOString();
-    const id = `proj-${Date.now()}`;
-    const newProject: Project = {
-      id,
-      name: trimmed,
-      ownerId: owner.id,
-      ownerName: owner.name,
-      currentUserRole: 'owner',
-      updatedAt: now,
-      lastOpenedAt: now,
-      nodes: [],
-      collaborators: [
-        {
-          id: owner.id,
-          name: owner.name,
-          email: owner.email,
-          initials: owner.initials,
-          role: 'owner',
-          online: true,
-          cursorColor: '#F4F4F6',
-        },
-      ],
-      executions: [],
-    };
-    setProjects((prev) => [newProject, ...prev]);
-    pushToast(`Created project "${trimmed}"`, 'success', 'Open workspace to add folders and files.');
-    return { projectId: id };
-  };
-
-  const handleRenameProject = (projectId: string, nextName: string): { error?: string } => {
-    const trimmed = nextName.trim();
-    if (!trimmed) return { error: 'Project name cannot be empty.' };
-    if (
-      projects.some(
-        (p) => p.id !== projectId && p.name.toLowerCase() === trimmed.toLowerCase()
-      )
-    ) {
-      return { error: `A project named "${trimmed}" already exists.` };
-    }
-    const now = new Date().toISOString();
-    setProjects((prev) =>
-      prev.map((p) => (p.id === projectId ? { ...p, name: trimmed, updatedAt: now } : p))
-    );
-    pushToast(`Renamed project to "${trimmed}"`, 'success');
-    return {};
-  };
-
-  const handleDeleteProject = (projectId: string) => {
-    const target = projects.find((p) => p.id === projectId);
-    setProjects((prev) => prev.filter((p) => p.id !== projectId));
-    if (activeProjectId === projectId) {
-      setView('dashboard');
-    }
-    if (target) pushToast(`Deleted "${target.name}"`, 'info');
-  };
-
-  const handleChangeDemoRole = (projectId: string, role: Role) => {
-    setProjects((prev) =>
-      prev.map((p) => (p.id === projectId ? { ...p, currentUserRole: role } : p))
-    );
-    pushToast(
-      `Switched workspace role to ${role.charAt(0).toUpperCase() + role.slice(1)}`,
-      'info'
-    );
-  };
-
-  const handleCreateFolder = (
-    projectId: string,
-    name: string,
-    parentId: string | null
-  ): { error?: string } => {
-    const proj = projects.find((p) => p.id === projectId);
-    if (!proj) return { error: 'Project not found.' };
-    const id = `folder-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
-    const res = createFolderNode(proj.nodes, name, parentId, id);
-    if (res.error) return { error: res.error };
-    const now = new Date().toISOString();
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === projectId ? { ...p, nodes: res.nodes, updatedAt: now } : p
-      )
-    );
-    pushToast(`Created folder "${res.created.name}"`, 'success');
-    return {};
-  };
-
-  const handleCreateFile = (
-    projectId: string,
-    name: string,
-    language: SupportedLanguage,
-    parentId: string | null
-  ): { error?: string; createdId?: string } => {
-    const proj = projects.find((p) => p.id === projectId);
-    if (!proj) return { error: 'Project not found.' };
-    const id = `file-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
-    const res = createFileNode(proj.nodes, name, language, parentId, id);
-    if (res.error) return { error: res.error };
-    const now = new Date().toISOString();
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === projectId ? { ...p, nodes: res.nodes, updatedAt: now } : p
-      )
-    );
-    pushToast(`Created ${res.created.name}`, 'success');
-    return { createdId: res.created.id };
-  };
-
-  const handleRenameNode = (
-    projectId: string,
-    nodeId: string,
-    nextName: string
-  ): { error?: string } => {
-    const proj = projects.find((p) => p.id === projectId);
-    if (!proj) return { error: 'Project not found.' };
-    const res = renameFileNode(proj.nodes, nodeId, nextName);
-    if (res.error) return { error: res.error };
-    const now = new Date().toISOString();
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === projectId ? { ...p, nodes: res.nodes, updatedAt: now } : p
-      )
-    );
-    pushToast(`Renamed to "${nextName.trim()}"`, 'success');
-    return {};
-  };
-
-  const handleMoveNode = (
-    projectId: string,
-    nodeId: string,
-    targetParentId: string | null
-  ): { error?: string } => {
-    const proj = projects.find((p) => p.id === projectId);
-    if (!proj) return { error: 'Project not found.' };
-    const res = moveFileNode(proj.nodes, nodeId, targetParentId);
-    if (res.error) return { error: res.error };
-    const now = new Date().toISOString();
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === projectId ? { ...p, nodes: res.nodes, updatedAt: now } : p
-      )
-    );
-    pushToast('Moved item successfully', 'success');
-    return {};
-  };
-
-  const handleDeleteNode = (projectId: string, nodeId: string) => {
-    const proj = projects.find((p) => p.id === projectId);
-    if (!proj) return;
-    const target = proj.nodes.find((n) => n.id === nodeId);
-    const res = deleteFileNode(proj.nodes, nodeId);
-    const now = new Date().toISOString();
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === projectId ? { ...p, nodes: res.nodes, updatedAt: now } : p
-      )
-    );
-    if (target) pushToast(`Deleted "${target.name}"`, 'info');
-  };
-
-  const handleUpdateFileContent = (projectId: string, fileId: string, content: string) => {
-    const now = new Date().toISOString();
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === projectId
-          ? {
-              ...p,
-              updatedAt: now,
-              nodes: p.nodes.map((n) =>
-                n.id === fileId ? { ...n, content, updatedAt: now } : n
-              ),
-            }
-          : p
-      )
-    );
-  };
-
-  const handleRecordExecution = (projectId: string, record: ExecutionRecord) => {
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === projectId
-          ? { ...p, executions: [record, ...p.executions].slice(0, 40) }
-          : p
-      )
-    );
-  };
-
-  const handleInviteCollaborator = (
-    projectId: string,
-    email: string,
-    access: CollaboratorAccess
-  ): { error?: string } => {
-    const proj = projects.find((p) => p.id === projectId);
-    if (!proj) return { error: 'Project not found.' };
-    if (proj.collaborators.some((c) => c.email.toLowerCase() === email.toLowerCase())) {
-      return { error: `${email} is already a collaborator on this project.` };
-    }
-    const rawName = email
-      .split('@')[0]
-      .replace(/[._-]+/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase());
-    const parts = rawName.split(/\s+/).filter(Boolean);
-    const initials =
-      parts.length >= 2
-        ? `${parts[0][0]}${parts[1][0]}`.toUpperCase()
-        : rawName.slice(0, 2).toUpperCase();
-
-    const colors = ['#5E5CE6', '#14B8A6', '#F59E0B', '#EC4899'];
-    const cursorColor = colors[proj.collaborators.length % colors.length];
-
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === projectId
-          ? {
-              ...p,
-              collaborators: [
-                ...p.collaborators,
-                {
-                  id: `collab-${Date.now()}`,
-                  name: rawName,
-                  email,
-                  initials,
-                  role: access,
-                  online: true,
-                  cursorColor,
-                },
-              ],
-            }
-          : p
-      )
-    );
-    pushToast(
-      `Invited ${email}`,
-      'success',
-      access === 'edit' ? 'Granted Edit Access' : 'Granted View Access'
-    );
-    return {};
-  };
-
-  const handleUpdateCollaboratorAccess = (
-    projectId: string,
-    collaboratorId: string,
-    access: CollaboratorAccess
-  ) => {
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === projectId
-          ? {
-              ...p,
-              collaborators: p.collaborators.map((c) =>
-                c.id === collaboratorId ? { ...c, role: access } : c
-              ),
-            }
-          : p
-      )
-    );
-    pushToast(
-      `Updated access to ${access === 'edit' ? 'Edit Access' : 'View Access'}`,
-      'success'
-    );
-  };
-
-  const handleRevokeCollaborator = (projectId: string, collaboratorId: string) => {
-    const proj = projects.find((p) => p.id === projectId);
-    const removed = proj?.collaborators.find((c) => c.id === collaboratorId);
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === projectId
-          ? {
-              ...p,
-              collaborators: p.collaborators.filter((c) => c.id !== collaboratorId),
-            }
-          : p
-      )
-    );
-    if (removed) pushToast(`Revoked access for ${removed.name}`, 'info');
-  };
-
-  const activePerms = activeProject
-    ? getPermissionsForRole(activeProject.currentUserRole)
-    : null;
+    : undefined;
 
   return (
     <>
-      {view === 'landing' && (
-        <LandingPage
-          onGetStarted={() => setView('auth')}
-          onOpenDemo={handleOpenDemoWorkspace}
+      <DocumentTitleManager />
+
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <LandingPage
+              onGetStarted={() => navigate('/login')}
+              onOpenDemo={() => navigate('/demo')}
+            />
+          }
         />
-      )}
 
-      {view === 'auth' && (
-        <AuthView
-          onAuthenticated={handleAuthenticated}
-          onBackToLanding={() => setView('landing')}
+        <Route
+          path="/login"
+          element={
+            <PublicOnlyRoute>
+              <AuthView
+                onAuthenticated={(account) => {
+                  pushToast(`Signed in as ${account.name}`, 'success');
+                  navigate('/dashboard');
+                }}
+                onBackToLanding={() => navigate('/')}
+              />
+            </PublicOnlyRoute>
+          }
         />
-      )}
 
-      {view === 'dashboard' && (
-        <Dashboard
-          user={user ?? DEMO_USER}
-          projects={projects}
-          onOpenProject={handleOpenProject}
-          onCreateProject={handleCreateProject}
-          onRenameProject={handleRenameProject}
-          onDeleteProject={handleDeleteProject}
-          onSignOut={handleSignOut}
-          onOpenCommandPalette={() => setPaletteOpen(true)}
+        <Route
+          path="/register"
+          element={
+            <PublicOnlyRoute>
+              <AuthView
+                onAuthenticated={(account) => {
+                  pushToast(`Welcome, ${account.name}`, 'success');
+                  navigate('/dashboard');
+                }}
+                onBackToLanding={() => navigate('/')}
+              />
+            </PublicOnlyRoute>
+          }
         />
-      )}
 
-      {view === 'workspace' && activeProject && (
-        <Workspace
-          user={user ?? DEMO_USER}
-          project={activeProject}
-          onBackToDashboard={() => setView('dashboard')}
-          onRenameProject={handleRenameProject}
-          onChangeDemoRole={handleChangeDemoRole}
-          onCreateFolder={handleCreateFolder}
-          onCreateFile={handleCreateFile}
-          onRenameNode={handleRenameNode}
-          onMoveNode={handleMoveNode}
-          onDeleteNode={handleDeleteNode}
-          onUpdateFileContent={handleUpdateFileContent}
-          onRecordExecution={handleRecordExecution}
-          onInviteCollaborator={handleInviteCollaborator}
-          onUpdateCollaboratorAccess={handleUpdateCollaboratorAccess}
-          onRevokeCollaborator={handleRevokeCollaborator}
-          onOpenCommandPalette={() => setPaletteOpen(true)}
-          externalAction={workspaceAction}
-          onToast={pushToast}
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <DemoWorkspaceShell
+                mode="dashboard"
+                account={currentAccount}
+                onSignOut={() => {
+                  void logout();
+                  pushToast('Signed out', 'info');
+                }}
+              />
+            </ProtectedRoute>
+          }
         />
-      )}
 
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        projects={projects}
-        activeProject={view === 'workspace' ? activeProject : null}
-        canManageFiles={activePerms?.canManageFiles ?? false}
-        canRunCode={activePerms?.canRunCode ?? false}
-        onOpenProject={handleOpenProject}
-        onSelectFile={(fileId) =>
-          setWorkspaceAction({ type: 'select-file', fileId, nonce: Date.now() })
-        }
-        onRunCode={() => setWorkspaceAction({ type: 'run', nonce: Date.now() })}
-        onNewFile={() => setWorkspaceAction({ type: 'new-file', nonce: Date.now() })}
-        onNewFolder={() => setWorkspaceAction({ type: 'new-folder', nonce: Date.now() })}
-        onOpenShare={() => setWorkspaceAction({ type: 'share', nonce: Date.now() })}
-        onToggleCursors={() => setWorkspaceAction({ type: 'cursors', nonce: Date.now() })}
-        onBackToDashboard={() => setView('dashboard')}
-      />
+        <Route
+          path="/project/:projectId"
+          element={
+            <ProtectedRoute>
+              <DemoWorkspaceShell
+                mode="workspace"
+                account={currentAccount}
+                onSignOut={() => {
+                  void logout();
+                  pushToast('Signed out', 'info');
+                }}
+              />
+            </ProtectedRoute>
+          }
+        />
 
-      <ToastContainer
-        toasts={toasts}
-        onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
-      />
+        <Route path="/demo" element={<DemoWorkspaceShell mode="workspace" />} />
+
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
