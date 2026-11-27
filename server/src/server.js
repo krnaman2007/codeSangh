@@ -8,19 +8,20 @@ const PORT = env.PORT || 5000;
 // Create HTTP server instance
 const server = http.createServer(app);
 
-// Start server after connecting to database
+// Start server and connect to database
 async function startServer() {
-  try {
-    // Connect to Neon PostgreSQL via Prisma Client
-    await connectDB();
+  // Start listening immediately so health check and other non-blocking services are accessible
+  server.listen(PORT, () => {
+    console.log(`🚀 Server running in ${env.NODE_ENV} mode on port ${PORT}`);
+    console.log(`🔗 Health check: http://localhost:${PORT}/api/v1/health`);
+  });
 
-    server.listen(PORT, () => {
-      console.log(`🚀 Server running in ${env.NODE_ENV} mode on port ${PORT}`);
-      console.log(`🔗 Health check: http://localhost:${PORT}/api/v1/health`);
-    });
+  // Attempt database connection
+  try {
+    await connectDB();
   } catch (error) {
-    console.error('❌ Failed to start server:', error.message);
-    process.exit(1);
+    console.warn(`⚠️ Warning: Database connection failed on startup: ${error.message}`);
+    console.warn('⚠️ Health check and in-memory endpoints remain operational while database retries.');
   }
 }
 

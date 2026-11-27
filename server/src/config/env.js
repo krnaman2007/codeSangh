@@ -14,6 +14,12 @@ const env = {
   DATABASE_URL: process.env.DATABASE_URL || '',
   DIRECT_URL: process.env.DIRECT_URL || '',
   CLIENT_ORIGIN: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+
+  // Auth Configuration (Blueprint Section 4.1)
+  JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET || 'devsync-jwt-access-secret-default-change-me',
+  JWT_ACCESS_EXPIRES: process.env.JWT_ACCESS_EXPIRES || '15m',
+  REFRESH_TOKEN_DAYS: parseInt(process.env.REFRESH_TOKEN_DAYS, 10) || 7,
+  BCRYPT_ROUNDS: parseInt(process.env.BCRYPT_ROUNDS, 10) || 12,
 };
 
 export default env;
