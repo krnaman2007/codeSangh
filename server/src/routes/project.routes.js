@@ -36,6 +36,10 @@ import {
   getBreakpoints,
   replaceBreakpoints,
 } from '../controllers/debug.controller.js';
+import {
+  getRepoInfo,
+  initRepo,
+} from '../controllers/git.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
 import { requireRole } from '../middleware/projectAccess.js';
@@ -74,6 +78,10 @@ import {
   fileBreakpointsParamsSchema,
   replaceBreakpointsSchema,
 } from '../validators/debug.schema.js';
+import {
+  gitRepoParamSchema,
+  initGitSchema,
+} from '../validators/git.schema.js';
 
 const router = Router();
 
@@ -234,6 +242,24 @@ router.put(
   validate(replaceBreakpointsSchema),
   requireRole('editor'),
   replaceBreakpoints
+);
+
+// Endpoint #38: GET /api/v1/projects/:projectId/git (Viewer+)
+router.get(
+  '/:projectId/git',
+  authenticate,
+  validate(gitRepoParamSchema),
+  requireRole('viewer'),
+  getRepoInfo
+);
+
+// Endpoint #39: POST /api/v1/projects/:projectId/git/init (Editor+)
+router.post(
+  '/:projectId/git/init',
+  authenticate,
+  validate(initGitSchema),
+  requireRole('editor'),
+  initRepo
 );
 
 export default router;
