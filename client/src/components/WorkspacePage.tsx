@@ -1,0 +1,709 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+  ArrowLeft,
+  Check,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pencil,
+  Play,
+  Search,
+  Share2,
+} from 'lucide-react';
+import { ApiClientError } from '../api/errors';
+import { useProjectsQuery, useProjectDetailsQuery, useRenameProjectMutation } from '../hooks/useProjects';
+import { useFileDetailQuery, useLanguagesQuery, useNodeMutations, useProjectTreeQuery } from '../hooks/useProjectNodes';
+import { getPermissionsForRole } from '../utils/permissions';
+import { getNodeBreadcrumb, getSortedChildren } from '../utils/fileTree';
+import { detectPlatform, matchWorkspaceShortcut } from '../utils/shortcuts';
+import { useAuth, getInitials } from '../state/authStore';
+import { useUiStore } from '../state/uiStore';
+import type { FileNode, Project, SupportedLanguage } from '../types/devsync';
+import { BrandLogo } from './BrandMark';
+import { FileExplorer } from './FileExplorer';
+import { MonacoCodeEditor, type FileSaveState, type OpenEditorFile } from './MonacoCodeEditor';
+import { BottomPanel, type BottomTab } from './BottomPanel';
+import { CommandPalette } from './CommandPalette';
+import { ProjectErrorState } from './ProjectErrorState';
+import { GlassButton, GlassPanel, RoleChip, Skeleton } from './ui';
+
+export function WorkspacePage() {
+  const { projectId = '' } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { pushToast, commandPaletteOpen, setCommandPaletteOpen } = useUiStore();
+
+  const projectQuery = useProjectDetailsQuery(projectId);
+  const treeQuery = useProjectTreeQuery(projectId);
+  const languagesQuery = useLanguagesQuery();
+  const dashboardQuery = useProjectsQuery('');
+  const renameProjectMutation = useRenameProjectMutation();
+  const nodeMutations = useNodeMutations(projectId);
+
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [bottomTab, setBottomTab] = useState<BottomTab>('output');
+  const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
+  const [openTabIds, setOpenTabIds] = useState<string[]>([]);
+  const [activeFileId, setActiveFileId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [loadedContents, setLoadedContents] = useState<Record<string, string>>({});
+  const [saveStates, setSaveStates] = useState<Record<string, FileSaveState>>({});
+
+  // Explorer focus & shortcut triggers
+  const [explorerFocused, setExplorerFocused] = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [createFileTrigger, setCreateFileTrigger] = useState(0);
+  const [createFolderTrigger, setCreateFolderTrigger] = useState(0);
+  const [renameTrigger, setRenameTrigger] = useState(0);
+  const [deleteTrigger, setDeleteTrigger] = useState(0);
+
+  // Inline project title rename (Owner only)
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+
+  const saveTimersRef = useRef<Record<string, number>>({});
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+
+  const activeFileDetailQuery = useFileDetailQuery(projectId, activeFileId);
+
+  // Reset per-project local workspace UI state when switching projectId
+  useEffect(() => {
+    setOpenTabIds([]);
+    setActiveFileId(null);
+    setDrafts({});
+    setLoadedContents({});
+    setSaveStates({});
+    setSelectedNodeId(null);
+    setEditingTitle(false);
+    Object.values(saveTimersRef.current).forEach((id) => window.clearTimeout(id));
+    saveTimersRef.current = {};
+  }, [projectId]);
+
+  const treeNodes = useMemo<FileNode[]>(() => {
+    if (!treeQuery.data?.nodes) return [];
+    return treeQuery.data.nodes.map((n) => ({
+      id: n.id,
+      parentId: n.parentId,
+      type: n.type,
+      name: n.name,
+      language: (n.language as SupportedLanguage | undefined) ?? undefined,
+      content: drafts[n.id] ?? loadedContents[n.id],
+      updatedAt: n.updatedAt ?? new Date().toISOString(),
+    }));
+  }, [treeQuery.data?.nodes, drafts, loadedContents]);
+
+  // Auto-open first file on initial project tree load
+  useEffect(() => {
+    if (openTabIds.length === 0 && treeNodes.length > 0 && !activeFileId) {
+      const sortedRoot = getSortedChildren(treeNodes, null);
+      const firstFile =
+        sortedRoot.find((n) => n.type === 'file') ??
+        treeNodes.find((n) => n.type === 'file');
+      if (firstFile) {
+        setOpenTabIds([firstFile.id]);
+        setActiveFileId(firstFile.id);
+      }
+    }
+  }, [treeNodes, openTabIds.length, activeFileId]);
+
+  // Clean up closed/deleted tabs when server tree updates
+  useEffect(() => {
+    if (!treeQuery.data?.nodes) return;
+    const validIds = new Set(treeQuery.data.nodes.map((n) => n.id));
+    setOpenTabIds((prev) => {
+      const filtered = prev.filter((id) => validIds.has(id));
+      if (filtered.length !== prev.length) {
+        if (activeFileId && !validIds.has(activeFileId)) {
+          setActiveFileId(filtered[0] ?? null);
+        }
+        return filtered;
+      }
+      return prev;
+    });
+  }, [treeQuery.data?.nodes, activeFileId]);
+
+  // Cache fetched file content when file detail arrives
+  useEffect(() => {
+    const file = activeFileDetailQuery.data?.file;
+    if (!file) return;
+    setLoadedContents((prev) => ({
+      ...prev,
+      [file.id]: file.content,
+    }));
+  }, [activeFileDetailQuery.data?.file]);
+
+  const role = projectQuery.data?.myRole ?? 'viewer';
+  const perms = getPermissionsForRole(role);
+  const projectName = projectQuery.data?.project.name ?? '';
+
+  const openFile = useCallback((fileId: string) => {
+    setOpenTabIds((prev) => (prev.includes(fileId) ? prev : [...prev, fileId]));
+    setActiveFileId(fileId);
+  }, []);
+
+  const closeTab = useCallback(
+    (fileId: string) => {
+      const timer = saveTimersRef.current[fileId];
+      if (timer) {
+        window.clearTimeout(timer);
+        delete saveTimersRef.current[fileId];
+      }
+      setOpenTabIds((prev) => {
+        const idx = prev.indexOf(fileId);
+        const next = prev.filter((id) => id !== fileId);
+        if (activeFileId === fileId) {
+          setActiveFileId(next[Math.max(0, idx - 1)] ?? null);
+        }
+        return next;
+      });
+    },
+    [activeFileId]
+  );
+
+  const saveFileNow = useCallback(
+    async (fileId: string) => {
+      if (!perms.canEditCode) return;
+      const content = draftsRef.current[fileId];
+      if (content === undefined) return;
+
+      const timer = saveTimersRef.current[fileId];
+      if (timer) {
+        window.clearTimeout(timer);
+        delete saveTimersRef.current[fileId];
+      }
+
+      setSaveStates((prev) => ({ ...prev, [fileId]: 'saving' }));
+      try {
+        await nodeMutations.updateContent.mutateAsync({ fileId, content });
+        setLoadedContents((prev) => ({ ...prev, [fileId]: content }));
+        setSaveStates((prev) => ({ ...prev, [fileId]: 'saved' }));
+      } catch (err) {
+        setSaveStates((prev) => ({ ...prev, [fileId]: 'error' }));
+        const msg = err instanceof ApiClientError ? err.userMessage : 'Could not save file.';
+        pushToast('Save failed', 'error', msg);
+      }
+    },
+    [nodeMutations.updateContent, perms.canEditCode, pushToast]
+  );
+
+  const handleContentEdit = useCallback(
+    (fileId: string, nextContent: string) => {
+      if (!perms.canEditCode) return;
+      setDrafts((prev) => ({ ...prev, [fileId]: nextContent }));
+      setSaveStates((prev) => ({ ...prev, [fileId]: 'dirty' }));
+
+      const existing = saveTimersRef.current[fileId];
+      if (existing) window.clearTimeout(existing);
+
+      saveTimersRef.current[fileId] = window.setTimeout(() => {
+        void saveFileNow(fileId);
+      }, 900);
+    },
+    [perms.canEditCode, saveFileNow]
+  );
+
+  // Global cross-platform workspace keyboard shortcuts
+  useEffect(() => {
+    const platform = detectPlatform();
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const inTextInput =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.tagName === 'SELECT';
+      const inMonaco = Boolean(target?.closest('.monaco-editor'));
+
+      const action = matchWorkspaceShortcut(e, platform, {
+        inExplorer: explorerFocused,
+        inTextInput: inTextInput && !inMonaco,
+      });
+
+      if (!action) return;
+
+      switch (action) {
+        case 'command-palette':
+          e.preventDefault();
+          setCommandPaletteOpen((prev) => !prev);
+          break;
+        case 'save-file':
+          e.preventDefault();
+          if (activeFileId && perms.canEditCode) {
+            void saveFileNow(activeFileId);
+          }
+          break;
+        case 'toggle-sidebar':
+          e.preventDefault();
+          setSidebarOpen((prev) => !prev);
+          break;
+        case 'toggle-terminal':
+          e.preventDefault();
+          setBottomPanelVisible((prev) => !prev);
+          setBottomTab('terminal');
+          break;
+        case 'new-file':
+          if (perms.canManageFiles) {
+            e.preventDefault();
+            setCreateFileTrigger((n) => n + 1);
+          }
+          break;
+        case 'new-folder':
+          if (perms.canManageFiles) {
+            e.preventDefault();
+            setCreateFolderTrigger((n) => n + 1);
+          }
+          break;
+        case 'rename-node':
+          if (perms.canManageFiles) {
+            e.preventDefault();
+            setRenameTrigger((n) => n + 1);
+          }
+          break;
+        case 'delete-node':
+          if (perms.canManageFiles) {
+            e.preventDefault();
+            setDeleteTrigger((n) => n + 1);
+          }
+          break;
+        case 'run-file':
+          if (perms.canRunCode) {
+            e.preventDefault();
+            pushToast('Run queued', 'info', 'Execution integration arrives in Phase 4.');
+          }
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    activeFileId,
+    explorerFocused,
+    perms.canEditCode,
+    perms.canManageFiles,
+    perms.canRunCode,
+    pushToast,
+    saveFileNow,
+    setCommandPaletteOpen,
+  ]);
+
+  if (projectQuery.isLoading) {
+    return (
+      <div className="min-h-screen bg-[var(--surface-canvas)] flex items-center justify-center p-6">
+        <GlassPanel className="w-full max-w-[400px] p-6 space-y-4">
+          <div className="flex items-center gap-2.5">
+            <BrandLogo size={20} />
+            <span className="text-[14px] font-semibold text-[var(--text-primary)]">
+              Loading workspace…
+            </span>
+          </div>
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-2/3" />
+        </GlassPanel>
+      </div>
+    );
+  }
+
+  if (projectQuery.isError || !projectQuery.data) {
+    return (
+      <ProjectErrorState
+        error={projectQuery.error}
+        onRetry={() => void projectQuery.refetch()}
+      />
+    );
+  }
+
+  const openEditorFiles: OpenEditorFile[] = openTabIds
+    .map((id): OpenEditorFile | null => {
+      const node = treeNodes.find((n) => n.id === id && n.type === 'file');
+      if (!node) return null;
+      const isCurrent = id === activeFileId;
+      const hasContent = drafts[id] !== undefined || loadedContents[id] !== undefined;
+      const loadErr =
+        isCurrent && activeFileDetailQuery.error instanceof ApiClientError
+          ? activeFileDetailQuery.error.userMessage
+          : null;
+
+      return {
+        id: node.id,
+        name: node.name,
+        language: node.language ?? 'text',
+        content: drafts[id] ?? loadedContents[id] ?? '',
+        isLoading: isCurrent && !hasContent && activeFileDetailQuery.isLoading,
+        loadError: loadErr,
+      };
+    })
+    .filter((f): f is OpenEditorFile => Boolean(f));
+
+  const activeEditorFile =
+    openEditorFiles.find((f) => f.id === activeFileId) ?? null;
+
+  const breadcrumb = activeFileId ? getNodeBreadcrumb(treeNodes, activeFileId) : [];
+  const languages = languagesQuery.data?.languages ?? [];
+
+  const commitProjectRename = async () => {
+    setEditingTitle(false);
+    if (!perms.canRenameProject) return;
+    const trimmed = titleDraft.trim();
+    if (!trimmed || trimmed === projectName) return;
+    try {
+      await renameProjectMutation.mutateAsync({ projectId, name: trimmed });
+      pushToast(`Renamed project to "${trimmed}"`, 'success');
+    } catch (err) {
+      const msg = err instanceof ApiClientError ? err.userMessage : 'Rename failed.';
+      pushToast('Rename failed', 'error', msg);
+    }
+  };
+
+  // Build lightweight Project objects for CommandPalette
+  const paletteProjects: Project[] = [
+    ...(dashboardQuery.data?.owned ?? []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      ownerId: user?.id ?? '',
+      ownerName: user?.name ?? 'You',
+      currentUserRole: 'owner' as const,
+      updatedAt: p.updatedAt,
+      lastOpenedAt: p.updatedAt,
+      nodes: p.id === projectId ? treeNodes : [],
+      collaborators: [],
+      executions: [],
+    })),
+    ...(dashboardQuery.data?.shared ?? []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      ownerId: p.owner.id,
+      ownerName: p.owner.name,
+      currentUserRole: p.role,
+      updatedAt: p.updatedAt,
+      lastOpenedAt: p.updatedAt,
+      nodes: p.id === projectId ? treeNodes : [],
+      collaborators: [],
+      executions: [],
+    })),
+  ];
+
+  const activePaletteProject: Project = {
+    id: projectId,
+    name: projectName,
+    ownerId: projectQuery.data.owner.id,
+    ownerName: projectQuery.data.owner.name,
+    currentUserRole: role,
+    updatedAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+    nodes: treeNodes,
+    collaborators: [],
+    executions: [],
+  };
+
+  return (
+    <div className="h-screen w-screen overflow-hidden bg-[var(--surface-canvas)] text-[var(--text-primary)] flex flex-col">
+      {/* Top Workspace Bar */}
+      <header className="h-12 px-3 glass-toolbar border-b flex items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard')}
+            aria-label="Back to Dashboard"
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-mechanical whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" strokeWidth={1.5} />
+            <span className="hidden sm:inline">Dashboard</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((prev) => !prev)}
+            aria-label={sidebarOpen ? 'Hide Explorer' : 'Show Explorer'}
+            title="Toggle Explorer (⌘B / Ctrl+B)"
+            className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-mechanical cursor-pointer"
+          >
+            {sidebarOpen ? (
+              <PanelLeftClose className="w-3.5 h-3.5" strokeWidth={1.5} />
+            ) : (
+              <PanelLeftOpen className="w-3.5 h-3.5" strokeWidth={1.5} />
+            )}
+          </button>
+
+          <span className="text-white/[0.12]" aria-hidden="true">
+            /
+          </span>
+
+          {editingTitle && perms.canRenameProject ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                autoFocus
+                aria-label="Edit project name"
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={() => void commitProjectRename()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitProjectRename();
+                  if (e.key === 'Escape') {
+                    setTitleDraft(projectName);
+                    setEditingTitle(false);
+                  }
+                }}
+                className="w-40 rounded bg-[var(--surface-elevated)] border border-[var(--accent-primary)] px-2 py-0.5 text-[13px] font-medium text-[var(--text-primary)] focus:outline-none"
+              />
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => void commitProjectRename()}
+                aria-label="Save project name"
+                className="p-1 text-[var(--state-success)] cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" strokeWidth={1.75} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={!perms.canRenameProject}
+              onClick={() => {
+                if (!perms.canRenameProject) return;
+                setTitleDraft(projectName);
+                setEditingTitle(true);
+              }}
+              className={`group inline-flex items-center gap-1.5 text-[13px] font-semibold text-[var(--text-primary)] truncate max-w-[180px] ${
+                perms.canRenameProject ? 'hover:text-white cursor-pointer' : 'cursor-default'
+              }`}
+            >
+              <span className="truncate">{projectName}</span>
+              {perms.canRenameProject && (
+                <Pencil
+                  className="w-3 h-3 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-mechanical shrink-0"
+                  strokeWidth={1.5}
+                />
+              )}
+            </button>
+          )}
+
+          {breadcrumb.length > 0 && (
+            <nav
+              aria-label="File path breadcrumb"
+              className="hidden lg:flex items-center gap-1.5 text-[12px] font-mono text-[var(--text-muted)] min-w-0 truncate"
+            >
+              {breadcrumb.map((part) => (
+                <span key={part.id} className="inline-flex items-center gap-1.5 truncate">
+                  <span aria-hidden="true">/</span>
+                  <span
+                    className={
+                      part.id === activeFileId
+                        ? 'text-[var(--text-secondary)] truncate'
+                        : 'text-[var(--text-muted)] truncate'
+                    }
+                  >
+                    {part.name}
+                  </span>
+                </span>
+              ))}
+            </nav>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2.5 shrink-0">
+          <RoleChip role={role} />
+
+          <button
+            type="button"
+            onClick={() => setCommandPaletteOpen(true)}
+            aria-label="Open Command Palette"
+            title="Command Palette (⌘K)"
+            className="hidden xl:inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-[var(--surface-base)] hover:bg-[var(--surface-hover)] border border-[var(--border-hairline)] text-[12px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-mechanical cursor-pointer"
+          >
+            <Search className="w-3.5 h-3.5" strokeWidth={1.5} />
+            <kbd className="font-mono text-[10px]">⌘K</kbd>
+          </button>
+
+          <GlassButton
+            variant="primary"
+            size="sm"
+            disabled={!perms.canRunCode || !activeEditorFile}
+            onClick={() =>
+              pushToast('Run queued', 'info', 'Backend execution wires up in Phase 4.')
+            }
+            title={
+              perms.canRunCode ? 'Run active file' : 'Disabled in Read-Only Viewer mode'
+            }
+          >
+            <Play className="w-3.5 h-3.5" strokeWidth={1.75} />
+            <span>Run</span>
+          </GlassButton>
+
+          {perms.canManageCollaborators && (
+            <GlassButton
+              variant="glass"
+              size="sm"
+              onClick={() =>
+                pushToast('Collaborators', 'info', 'Owner sharing modal wires up in Phase 4.')
+              }
+            >
+              <Share2 className="w-3.5 h-3.5 text-[var(--text-secondary)]" strokeWidth={1.5} />
+              <span>Share</span>
+            </GlassButton>
+          )}
+        </div>
+      </header>
+
+      {/* Main IDE Body */}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        {sidebarOpen && (
+          <FileExplorer
+            nodes={treeNodes}
+            languages={languages}
+            activeFileId={activeFileId}
+            canManageFiles={perms.canManageFiles}
+            isLoading={treeQuery.isLoading}
+            onSelectFile={openFile}
+            onCreateFolder={async (name, parentId) => {
+              try {
+                await nodeMutations.createFolder.mutateAsync({ name, parentId });
+                pushToast(`Created folder "${name.trim()}"`, 'success');
+                return {};
+              } catch (err) {
+                return {
+                  error:
+                    err instanceof ApiClientError
+                      ? err.userMessage
+                      : 'Could not create folder.',
+                };
+              }
+            }}
+            onCreateFile={async (name, language, parentId) => {
+              try {
+                const res = await nodeMutations.createFile.mutateAsync({
+                  name,
+                  language,
+                  parentId,
+                });
+                openFile(res.node.id);
+                pushToast(`Created ${res.node.name}`, 'success');
+                return { createdId: res.node.id };
+              } catch (err) {
+                return {
+                  error:
+                    err instanceof ApiClientError ? err.userMessage : 'Could not create file.',
+                };
+              }
+            }}
+            onRenameNode={async (nodeId, nextName) => {
+              try {
+                await nodeMutations.renameNode.mutateAsync({ nodeId, name: nextName });
+                pushToast(`Renamed to "${nextName.trim()}"`, 'success');
+                return {};
+              } catch (err) {
+                return {
+                  error:
+                    err instanceof ApiClientError ? err.userMessage : 'Could not rename item.',
+                };
+              }
+            }}
+            onMoveNode={async (nodeId, parentId) => {
+              try {
+                await nodeMutations.moveNode.mutateAsync({ nodeId, parentId });
+                pushToast('Moved item', 'success');
+                return {};
+              } catch (err) {
+                const msg =
+                  err instanceof ApiClientError ? err.userMessage : 'Could not move item.';
+                pushToast('Move failed', 'error', msg);
+                return { error: msg };
+              }
+            }}
+            onChangeFileLanguage={async (fileId, language) => {
+              try {
+                await nodeMutations.changeLanguage.mutateAsync({ fileId, language });
+                pushToast('Updated file language', 'success');
+                return {};
+              } catch (err) {
+                const msg =
+                  err instanceof ApiClientError
+                    ? err.userMessage
+                    : 'Could not change language.';
+                pushToast('Language update failed', 'error', msg);
+                return { error: msg };
+              }
+            }}
+            onDeleteNode={async (nodeId) => {
+              try {
+                const res = await nodeMutations.deleteNode.mutateAsync(nodeId);
+                for (const deletedId of res.deletedIds) {
+                  closeTab(deletedId);
+                }
+                pushToast('Deleted item', 'info');
+              } catch (err) {
+                const msg =
+                  err instanceof ApiClientError ? err.userMessage : 'Could not delete item.';
+                pushToast('Delete failed', 'error', msg);
+              }
+            }}
+            externalCreateFileTrigger={createFileTrigger}
+            externalCreateFolderTrigger={createFolderTrigger}
+            onExplorerFocusChange={setExplorerFocused}
+            selectedNodeId={selectedNodeId}
+            onSelectNodeChange={setSelectedNodeId}
+            externalRenameTrigger={renameTrigger}
+            externalDeleteTrigger={deleteTrigger}
+          />
+        )}
+
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+          <MonacoCodeEditor
+            openFiles={openEditorFiles}
+            activeFile={activeEditorFile}
+            languages={languages}
+            canEditCode={perms.canEditCode}
+            saveStates={saveStates}
+            onSelectTab={setActiveFileId}
+            onCloseTab={closeTab}
+            onChangeContent={handleContentEdit}
+            onSaveFile={(fileId) => void saveFileNow(fileId)}
+            onChangeLanguage={(fileId, language) => {
+              void nodeMutations.changeLanguage
+                .mutateAsync({ fileId, language })
+                .then(() => pushToast('Updated file language', 'success'))
+                .catch((err) => {
+                  const msg =
+                    err instanceof ApiClientError
+                      ? err.userMessage
+                      : 'Could not update language.';
+                  pushToast('Language update failed', 'error', msg);
+                });
+            }}
+          />
+
+          {bottomPanelVisible && (
+            <BottomPanel
+              projectId={projectId}
+              projectName={projectName}
+              nodes={treeNodes}
+              userName={user?.name ?? getInitials(projectName)}
+              canRunCode={perms.canRunCode}
+              activeTab={bottomTab}
+              onTabChange={setBottomTab}
+              latestExecution={null}
+              executions={[]}
+              onTerminalExecution={() => {}}
+            />
+          )}
+        </div>
+      </div>
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        projects={paletteProjects}
+        activeProject={activePaletteProject}
+        canManageFiles={perms.canManageFiles}
+        canRunCode={perms.canRunCode}
+        onOpenProject={(targetProjectId) => navigate(`/project/${targetProjectId}`)}
+        onSelectFile={openFile}
+        onNewFile={() => setCreateFileTrigger((n) => n + 1)}
+        onNewFolder={() => setCreateFolderTrigger((n) => n + 1)}
+        onBackToDashboard={() => navigate('/dashboard')}
+      />
+    </div>
+  );
+}

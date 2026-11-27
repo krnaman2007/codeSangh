@@ -73,7 +73,28 @@ export const SUPPORTED_LANGUAGES: LanguageMeta[] = [
     starterCode: (name) =>
       `/* ${name} */\n:root {\n  --surface: #0b0b0f;\n  --accent: #5e5ce6;\n}\n\n.container {\n  display: grid;\n  gap: 16px;\n  color: #f4f4f6;\n}\n`,
   },
+  {
+    id: 'text',
+    label: 'Plain text',
+    shortTag: 'TXT',
+    extension: '.txt',
+    runtime: 'Plain text',
+    color: '#9494A3',
+    starterCode: () => '',
+  },
 ];
+
+export function resolveFileNameWithExtension(
+  rawName: string,
+  language: string
+): string {
+  const trimmed = rawName.trim();
+  if (!trimmed) return '';
+  const hasExt = /\.[a-zA-Z0-9_-]+$/.test(trimmed);
+  if (hasExt) return trimmed;
+  const meta = getLanguageMeta(language as SupportedLanguage);
+  return meta.extension ? `${trimmed}${meta.extension}` : trimmed;
+}
 
 export function getLanguageMeta(lang?: SupportedLanguage): LanguageMeta {
   return (

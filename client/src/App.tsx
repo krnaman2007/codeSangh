@@ -3,7 +3,7 @@ import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { LandingPage } from './components/LandingPage';
 import { AuthView } from './components/AuthView';
 import { DashboardPage } from './components/DashboardPage';
-import { ProjectRouteGate } from './components/ProjectRouteGate';
+import { WorkspacePage } from './components/WorkspacePage';
 import { NotFoundPage } from './components/NotFoundPage';
 import { DemoWorkspaceShell } from './components/DemoWorkspaceShell';
 import { ToastContainer } from './components/BrandMark';
@@ -82,7 +82,7 @@ export default function App() {
           path="/project/:projectId"
           element={
             <ProtectedRoute>
-              <ProjectRouteGate />
+              <WorkspacePage />
             </ProtectedRoute>
           }
         />

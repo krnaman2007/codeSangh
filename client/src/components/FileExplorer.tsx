@@ -1,89 +1,157 @@
-import { useState, type FormEvent } from 'react';
 import {
-  ChevronRight,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react';
+import {
   ChevronDown,
-  Folder,
-  FolderOpen,
+  ChevronRight,
   FilePlus,
-  FolderPlus,
-  Pencil,
+  Folder,
   FolderInput,
+  FolderOpen,
+  FolderPlus,
+  Languages,
+  MoreVertical,
+  Pencil,
   Trash2,
-  X,
 } from 'lucide-react';
 import type { FileNode, SupportedLanguage } from '../types/devsync';
+import type { LanguageRegistryEntry } from '../api/types';
 import {
   SUPPORTED_LANGUAGES,
   getLanguageMeta,
   getNodePath,
   getSortedChildren,
   isDescendantOf,
+  resolveFileNameWithExtension,
 } from '../utils/fileTree';
+import { Dialog, FormField, GlassButton, GlassPanel, TextInput } from './ui';
 
 interface FileExplorerProps {
   nodes: FileNode[];
+  languages?: LanguageRegistryEntry[];
   activeFileId: string | null;
   canManageFiles: boolean;
+  isLoading?: boolean;
   onSelectFile: (fileId: string) => void;
-  onCreateFolder: (name: string, parentId: string | null) => { error?: string };
+  onCreateFolder: (
+    name: string,
+    parentId: string | null
+  ) => Promise<{ error?: string }> | { error?: string };
   onCreateFile: (
     name: string,
     language: SupportedLanguage,
     parentId: string | null
-  ) => { error?: string };
-  onRenameNode: (nodeId: string, nextName: string) => { error?: string };
-  onMoveNode: (nodeId: string, targetParentId: string | null) => { error?: string };
-  onDeleteNode: (nodeId: string) => void;
+  ) => Promise<{ error?: string; createdId?: string }> | { error?: string; createdId?: string };
+  onRenameNode: (
+    nodeId: string,
+    nextName: string
+  ) => Promise<{ error?: string }> | { error?: string };
+  onMoveNode: (
+    nodeId: string,
+    targetParentId: string | null
+  ) => Promise<{ error?: string }> | { error?: string };
+  onChangeFileLanguage?: (
+    fileId: string,
+    language: SupportedLanguage
+  ) => Promise<{ error?: string }> | { error?: string };
+  onDeleteNode: (nodeId: string) => Promise<{ error?: string } | void> | void;
   externalCreateFileTrigger: number;
   externalCreateFolderTrigger: number;
+  onExplorerFocusChange?: (focused: boolean) => void;
+  selectedNodeId?: string | null;
+  onSelectNodeChange?: (nodeId: string | null) => void;
+  externalRenameTrigger?: number;
+  externalDeleteTrigger?: number;
+}
+
+interface VisibleTreeItem {
+  node: FileNode;
+  depth: number;
 }
 
 export function FileExplorer({
   nodes,
+  languages,
   activeFileId,
   canManageFiles,
+  isLoading = false,
   onSelectFile,
   onCreateFolder,
   onCreateFile,
   onRenameNode,
   onMoveNode,
+  onChangeFileLanguage,
   onDeleteNode,
   externalCreateFileTrigger,
   externalCreateFolderTrigger,
+  onExplorerFocusChange,
+  selectedNodeId,
+  onSelectNodeChange,
+  externalRenameTrigger = 0,
+  externalDeleteTrigger = 0,
 }: FileExplorerProps) {
-  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>(() => {
-    const initial: Record<string, boolean> = {};
-    for (const n of nodes) {
-      if (n.type === 'folder') initial[n.id] = true;
-    }
-    return initial;
-  });
+  const treeRef = useRef<HTMLDivElement | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+  const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | '__root__' | null>(null);
 
-  // New Folder Modal (Folder Name ONLY)
+  // Context Menu
+  const [contextMenu, setContextMenu] = useState<{
+    node: FileNode;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // New Folder Dialog (Folder Name ONLY)
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [folderName, setFolderName] = useState('');
   const [folderParentId, setFolderParentId] = useState<string | null>(null);
   const [folderError, setFolderError] = useState<string | null>(null);
+  const [submittingFolder, setSubmittingFolder] = useState(false);
 
-  // New File Modal (File Name + Programming Language)
+  // New File Dialog (File Name + Language)
   const [showFileModal, setShowFileModal] = useState(false);
   const [fileName, setFileName] = useState('');
   const [fileLanguage, setFileLanguage] = useState<SupportedLanguage>('python');
   const [fileParentId, setFileParentId] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [submittingFile, setSubmittingFile] = useState(false);
 
-  // Rename Modal
-  const [renameNode, setRenameNode] = useState<FileNode | null>(null);
+  // Rename Dialog
+  const [renameTarget, setRenameTarget] = useState<FileNode | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [submittingRename, setSubmittingRename] = useState(false);
 
-  // Move Modal
-  const [moveNodeTarget, setMoveNodeTarget] = useState<FileNode | null>(null);
+  // Move Dialog
+  const [moveTarget, setMoveTarget] = useState<FileNode | null>(null);
   const [moveDestId, setMoveDestId] = useState<string>('__root__');
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [submittingMove, setSubmittingMove] = useState(false);
 
-  // Track external triggers from Command Palette
+  // Change Language Dialog
+  const [langTarget, setLangTarget] = useState<FileNode | null>(null);
+  const [langValue, setLangValue] = useState<SupportedLanguage>('javascript');
+  const [submittingLang, setSubmittingLang] = useState(false);
+
+  // Delete Confirmation Dialog
+  const [deleteTarget, setDeleteTarget] = useState<FileNode | null>(null);
+  const [submittingDelete, setSubmittingDelete] = useState(false);
+
+  const activeSelectedId = selectedNodeId ?? internalSelectedId;
+  const setSelectedNode = (id: string | null) => {
+    setInternalSelectedId(id);
+    onSelectNodeChange?.(id);
+  };
+
+  // External triggers from Command Palette / Shortcuts
   const [lastFileTrigger, setLastFileTrigger] = useState(externalCreateFileTrigger);
   if (externalCreateFileTrigger !== lastFileTrigger) {
     setLastFileTrigger(externalCreateFileTrigger);
@@ -107,7 +175,56 @@ export function FileExplorer({
     }
   }
 
-  const folders = nodes.filter((n) => n.type === 'folder');
+  const [lastRenameTrigger, setLastRenameTrigger] = useState(externalRenameTrigger);
+  if (externalRenameTrigger !== lastRenameTrigger) {
+    setLastRenameTrigger(externalRenameTrigger);
+    const target = nodes.find((n) => n.id === activeSelectedId);
+    if (canManageFiles && target) {
+      setRenameTarget(target);
+      setRenameValue(target.name);
+      setRenameError(null);
+    }
+  }
+
+  const [lastDeleteTrigger, setLastDeleteTrigger] = useState(externalDeleteTrigger);
+  if (externalDeleteTrigger !== lastDeleteTrigger) {
+    setLastDeleteTrigger(externalDeleteTrigger);
+    const target = nodes.find((n) => n.id === activeSelectedId);
+    if (canManageFiles && target) {
+      setDeleteTarget(target);
+    }
+  }
+
+  const folders = useMemo(() => nodes.filter((n) => n.type === 'folder'), [nodes]);
+
+  const languageOptions = useMemo(() => {
+    if (languages && languages.length > 0) {
+      return languages.map((l) => ({
+        id: l.key as SupportedLanguage,
+        label: l.label,
+        ext: l.ext,
+      }));
+    }
+    return SUPPORTED_LANGUAGES.map((l) => ({
+      id: l.id,
+      label: l.label,
+      ext: l.extension,
+    }));
+  }, [languages]);
+
+  const visibleItems = useMemo<VisibleTreeItem[]>(() => {
+    const out: VisibleTreeItem[] = [];
+    const walk = (parentId: string | null, depth: number) => {
+      for (const node of getSortedChildren(nodes, parentId)) {
+        out.push({ node, depth });
+        if (node.type === 'folder' && (expandedFolders[node.id] ?? true)) {
+          walk(node.id, depth + 1);
+        }
+      }
+    };
+    walk(null, 0);
+    return out;
+  }, [nodes, expandedFolders]);
 
   const toggleFolder = (folderId: string) => {
     setExpandedFolders((prev) => ({
@@ -115,6 +232,7 @@ export function FileExplorer({
       [folderId]: !(prev[folderId] ?? true),
     }));
     setSelectedFolderId(folderId);
+    setSelectedNode(folderId);
   };
 
   const openNewFileModal = (parentId: string | null = selectedFolderId) => {
@@ -134,9 +252,49 @@ export function FileExplorer({
     setShowFolderModal(true);
   };
 
-  const handleFolderSubmit = (e: FormEvent) => {
+  const handleTreeKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (visibleItems.length === 0) return;
+    const currentIndex = visibleItems.findIndex((item) => item.node.id === activeSelectedId);
+    const idx = currentIndex >= 0 ? currentIndex : 0;
+    const current = visibleItems[idx]?.node;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = visibleItems[Math.min(visibleItems.length - 1, idx + 1)];
+      if (next) setSelectedNode(next.node.id);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = visibleItems[Math.max(0, idx - 1)];
+      if (prev) setSelectedNode(prev.node.id);
+    } else if (e.key === 'ArrowRight' && current?.type === 'folder') {
+      e.preventDefault();
+      const isExpanded = expandedFolders[current.id] ?? true;
+      if (!isExpanded) {
+        setExpandedFolders((prev) => ({ ...prev, [current.id]: true }));
+      }
+    } else if (e.key === 'ArrowLeft' && current) {
+      e.preventDefault();
+      if (current.type === 'folder' && (expandedFolders[current.id] ?? true)) {
+        setExpandedFolders((prev) => ({ ...prev, [current.id]: false }));
+      } else if (current.parentId) {
+        setSelectedNode(current.parentId);
+      }
+    } else if ((e.key === 'Enter' || e.key === ' ') && current) {
+      e.preventDefault();
+      if (current.type === 'folder') {
+        toggleFolder(current.id);
+      } else {
+        setSelectedFolderId(current.parentId);
+        onSelectFile(current.id);
+      }
+    }
+  };
+
+  const handleFolderSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const res = onCreateFolder(folderName, folderParentId);
+    setSubmittingFolder(true);
+    const res = await onCreateFolder(folderName, folderParentId);
+    setSubmittingFolder(false);
     if (res.error) {
       setFolderError(res.error);
       return;
@@ -147,9 +305,11 @@ export function FileExplorer({
     setShowFolderModal(false);
   };
 
-  const handleFileSubmit = (e: FormEvent) => {
+  const handleFileSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const res = onCreateFile(fileName, fileLanguage, fileParentId);
+    setSubmittingFile(true);
+    const res = await onCreateFile(fileName, fileLanguage, fileParentId);
+    setSubmittingFile(false);
     if (res.error) {
       setFileError(res.error);
       return;
@@ -160,22 +320,26 @@ export function FileExplorer({
     setShowFileModal(false);
   };
 
-  const handleRenameSubmit = (e: FormEvent) => {
+  const handleRenameSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!renameNode) return;
-    const res = onRenameNode(renameNode.id, renameValue);
+    if (!renameTarget) return;
+    setSubmittingRename(true);
+    const res = await onRenameNode(renameTarget.id, renameValue);
+    setSubmittingRename(false);
     if (res.error) {
       setRenameError(res.error);
       return;
     }
-    setRenameNode(null);
+    setRenameTarget(null);
   };
 
-  const handleMoveSubmit = (e: FormEvent) => {
+  const handleMoveSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!moveNodeTarget) return;
+    if (!moveTarget) return;
     const targetParent = moveDestId === '__root__' ? null : moveDestId;
-    const res = onMoveNode(moveNodeTarget.id, targetParent);
+    setSubmittingMove(true);
+    const res = await onMoveNode(moveTarget.id, targetParent);
+    setSubmittingMove(false);
     if (res.error) {
       setMoveError(res.error);
       return;
@@ -183,119 +347,57 @@ export function FileExplorer({
     if (targetParent) {
       setExpandedFolders((prev) => ({ ...prev, [targetParent]: true }));
     }
-    setMoveNodeTarget(null);
+    setMoveTarget(null);
   };
 
-  const renderTree = (parentId: string | null, depth: number) => {
-    const children = getSortedChildren(nodes, parentId);
-    return children.map((node) => {
-      const isExpanded = expandedFolders[node.id] ?? true;
-      const isActive = node.type === 'file' && node.id === activeFileId;
-      const langMeta = node.type === 'file' ? getLanguageMeta(node.language) : null;
-
-      return (
-        <div key={node.id}>
-          <div
-            className={`group flex items-center justify-between pr-2 h-8 text-[13px] transition-mechanical ${
-              isActive
-                ? 'bg-[#18181F] text-[#F4F4F6]'
-                : 'text-[#9494A3] hover:text-[#F4F4F6] hover:bg-[#111116]'
-            }`}
-            style={{ paddingLeft: `${10 + depth * 14}px` }}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                if (node.type === 'folder') {
-                  toggleFolder(node.id);
-                } else {
-                  setSelectedFolderId(node.parentId);
-                  onSelectFile(node.id);
-                }
-              }}
-              className="flex items-center gap-2 min-w-0 flex-1 h-full text-left cursor-pointer focus-visible:outline-none"
-            >
-              {node.type === 'folder' ? (
-                <>
-                  {isExpanded ? (
-                    <ChevronDown className="w-3.5 h-3.5 text-[#5C5C6E] shrink-0" strokeWidth={1.5} />
-                  ) : (
-                    <ChevronRight className="w-3.5 h-3.5 text-[#5C5C6E] shrink-0" strokeWidth={1.5} />
-                  )}
-                  {isExpanded ? (
-                    <FolderOpen className="w-3.5 h-3.5 text-[#9494A3] shrink-0" strokeWidth={1.5} />
-                  ) : (
-                    <Folder className="w-3.5 h-3.5 text-[#9494A3] shrink-0" strokeWidth={1.5} />
-                  )}
-                  <span className="truncate font-medium">{node.name}</span>
-                </>
-              ) : (
-                <>
-                  <span
-                    className="w-7 text-[10px] font-mono font-semibold text-left shrink-0 tracking-tight"
-                    style={{ color: langMeta?.color }}
-                  >
-                    {langMeta?.shortTag}
-                  </span>
-                  <span className="truncate font-mono text-[12px]">{node.name}</span>
-                </>
-              )}
-            </button>
-
-            {canManageFiles && (
-              <div className="hidden group-hover:flex group-focus-within:flex items-center gap-0.5 shrink-0 ml-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRenameNode(node);
-                    setRenameValue(node.name);
-                    setRenameError(null);
-                  }}
-                  aria-label={`Rename ${node.name}`}
-                  title="Rename"
-                  className="p-1 rounded text-[#5C5C6E] hover:text-[#F4F4F6] hover:bg-[#18181F] cursor-pointer"
-                >
-                  <Pencil className="w-3 h-3" strokeWidth={1.5} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMoveNodeTarget(node);
-                    setMoveDestId(node.parentId ?? '__root__');
-                    setMoveError(null);
-                  }}
-                  aria-label={`Move ${node.name}`}
-                  title="Move"
-                  className="p-1 rounded text-[#5C5C6E] hover:text-[#F4F4F6] hover:bg-[#18181F] cursor-pointer"
-                >
-                  <FolderInput className="w-3 h-3" strokeWidth={1.5} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDeleteNode(node.id)}
-                  aria-label={`Delete ${node.name}`}
-                  title="Delete"
-                  className="p-1 rounded text-[#5C5C6E] hover:text-[#EF4444] hover:bg-[#18181F] cursor-pointer"
-                >
-                  <Trash2 className="w-3 h-3" strokeWidth={1.5} />
-                </button>
-              </div>
-            )}
-          </div>
-
-          {node.type === 'folder' && isExpanded && renderTree(node.id, depth + 1)}
-        </div>
-      );
-    });
+  const handleLanguageSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!langTarget || !onChangeFileLanguage) return;
+    setSubmittingLang(true);
+    await onChangeFileLanguage(langTarget.id, langValue);
+    setSubmittingLang(false);
+    setLangTarget(null);
   };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setSubmittingDelete(true);
+    await onDeleteNode(deleteTarget.id);
+    setSubmittingDelete(false);
+    setDeleteTarget(null);
+  };
+
+  const handleDropOnTarget = async (e: DragEvent, targetParentId: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverFolderId(null);
+    if (!canManageFiles || !draggedNodeId) return;
+    if (draggedNodeId === targetParentId) return;
+    const dragged = nodes.find((n) => n.id === draggedNodeId);
+    if (!dragged || dragged.parentId === targetParentId) return;
+    if (targetParentId && dragged.type === 'folder' && isDescendantOf(nodes, targetParentId, dragged.id)) {
+      return;
+    }
+    await onMoveNode(draggedNodeId, targetParentId);
+    setDraggedNodeId(null);
+  };
+
+  const previewFileName = resolveFileNameWithExtension(fileName, fileLanguage);
 
   return (
     <aside
       aria-label="Project file explorer"
-      className="w-[244px] shrink-0 bg-[#0B0B0F] border-r border-white/[0.07] flex flex-col select-none"
+      onFocus={() => onExplorerFocusChange?.(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) {
+          onExplorerFocusChange?.(false);
+        }
+      }}
+      onClick={() => setContextMenu(null)}
+      className="w-[252px] shrink-0 bg-[var(--surface-base)] border-r border-[var(--border-hairline)] flex flex-col select-none relative"
     >
-      <div className="h-10 px-3 border-b border-white/[0.07] flex items-center justify-between">
-        <span className="text-[11px] font-medium text-[#9494A3] tracking-wide">
+      <div className="h-10 px-3 border-b border-[var(--border-hairline)] flex items-center justify-between">
+        <span className="text-[11px] font-medium text-[var(--text-secondary)] tracking-wide uppercase">
           Explorer
         </span>
         <div className="flex items-center gap-1">
@@ -304,8 +406,8 @@ export function FileExplorer({
             disabled={!canManageFiles}
             onClick={() => openNewFileModal(selectedFolderId)}
             aria-label="New File"
-            title={canManageFiles ? 'New File' : 'Read-only mode'}
-            className="p-1 rounded text-[#9494A3] hover:text-[#F4F4F6] hover:bg-[#18181F] disabled:opacity-35 disabled:cursor-not-allowed transition-mechanical cursor-pointer"
+            title={canManageFiles ? 'New File (Alt+N)' : 'Read-only mode'}
+            className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] disabled:opacity-35 disabled:cursor-not-allowed transition-mechanical cursor-pointer"
           >
             <FilePlus className="w-3.5 h-3.5" strokeWidth={1.5} />
           </button>
@@ -314,413 +416,554 @@ export function FileExplorer({
             disabled={!canManageFiles}
             onClick={() => openNewFolderModal(selectedFolderId)}
             aria-label="New Folder"
-            title={canManageFiles ? 'New Folder' : 'Read-only mode'}
-            className="p-1 rounded text-[#9494A3] hover:text-[#F4F4F6] hover:bg-[#18181F] disabled:opacity-35 disabled:cursor-not-allowed transition-mechanical cursor-pointer"
+            title={canManageFiles ? 'New Folder (Alt+Shift+N)' : 'Read-only mode'}
+            className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] disabled:opacity-35 disabled:cursor-not-allowed transition-mechanical cursor-pointer"
           >
             <FolderPlus className="w-3.5 h-3.5" strokeWidth={1.5} />
           </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-1.5">
-        {nodes.length === 0 ? (
+      {/* Tree Region with Root Drop Zone */}
+      <div
+        ref={treeRef}
+        role="tree"
+        aria-label="Project files and folders"
+        tabIndex={0}
+        onKeyDown={handleTreeKeyDown}
+        onDragOver={(e) => {
+          if (!canManageFiles) return;
+          e.preventDefault();
+          setDragOverFolderId('__root__');
+        }}
+        onDragLeave={() => setDragOverFolderId(null)}
+        onDrop={(e) => void handleDropOnTarget(e, null)}
+        className={`flex-1 overflow-y-auto py-1.5 focus:outline-none ${
+          dragOverFolderId === '__root__' ? 'ring-1 ring-inset ring-[var(--accent-primary)]/50' : ''
+        }`}
+      >
+        {isLoading ? (
+          <div className="px-3 py-4 space-y-2 text-[12px] text-[var(--text-muted)]">
+            Loading files…
+          </div>
+        ) : nodes.length === 0 ? (
           <div className="px-4 py-8 text-center">
-            <p className="text-[12px] text-[#5C5C6E]">Empty workspace</p>
+            <p className="text-[12px] text-[var(--text-muted)]">Empty workspace</p>
             {canManageFiles && (
               <div className="mt-3 flex flex-col gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => openNewFileModal(null)}
-                  className="w-full py-1.5 px-2.5 rounded-md bg-[#111116] hover:bg-[#18181F] border border-white/[0.08] text-[12px] text-[#F4F4F6] transition-mechanical cursor-pointer"
-                >
+                <GlassButton size="sm" variant="glass" onClick={() => openNewFileModal(null)}>
                   + New File
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openNewFolderModal(null)}
-                  className="w-full py-1.5 px-2.5 rounded-md bg-[#0B0B0F] hover:bg-[#18181F] border border-white/[0.07] text-[12px] text-[#9494A3] transition-mechanical cursor-pointer"
-                >
+                </GlassButton>
+                <GlassButton size="sm" variant="ghost" onClick={() => openNewFolderModal(null)}>
                   + New Folder
-                </button>
+                </GlassButton>
               </div>
             )}
           </div>
         ) : (
-          renderTree(null, 0)
+          visibleItems.map(({ node, depth }) => {
+            const isExpanded = expandedFolders[node.id] ?? true;
+            const isActiveFile = node.type === 'file' && node.id === activeFileId;
+            const isSelected = node.id === activeSelectedId;
+            const langMeta = node.type === 'file' ? getLanguageMeta(node.language) : null;
+            const isDropTarget = dragOverFolderId === node.id;
+
+            return (
+              <div
+                key={node.id}
+                role="treeitem"
+                aria-selected={isActiveFile || isSelected}
+                aria-expanded={node.type === 'folder' ? isExpanded : undefined}
+                draggable={canManageFiles}
+                onDragStart={(e) => {
+                  if (!canManageFiles) return;
+                  setDraggedNodeId(node.id);
+                  e.dataTransfer.effectAllowed = 'move';
+                }}
+                onDragEnd={() => {
+                  setDraggedNodeId(null);
+                  setDragOverFolderId(null);
+                }}
+                onDragOver={(e) => {
+                  if (!canManageFiles || node.type !== 'folder') return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDragOverFolderId(node.id);
+                }}
+                onDrop={(e) => {
+                  if (node.type === 'folder') {
+                    void handleDropOnTarget(e, node.id);
+                  }
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setSelectedNode(node.id);
+                  setContextMenu({ node, x: e.clientX, y: e.clientY });
+                }}
+                className={`group flex items-center justify-between pr-2 h-8 text-[13px] transition-mechanical ${
+                  isDropTarget
+                    ? 'bg-[var(--accent-soft)] text-[var(--text-primary)]'
+                    : isActiveFile
+                    ? 'bg-[var(--surface-hover)] text-[var(--text-primary)]'
+                    : isSelected
+                    ? 'bg-[var(--surface-elevated)] text-[var(--text-primary)]'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-elevated)]'
+                }`}
+                style={{ paddingLeft: `${10 + depth * 14}px` }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedNode(node.id);
+                    if (node.type === 'folder') {
+                      toggleFolder(node.id);
+                    } else {
+                      setSelectedFolderId(node.parentId);
+                      onSelectFile(node.id);
+                    }
+                  }}
+                  className="flex items-center gap-2 min-w-0 flex-1 h-full text-left cursor-pointer"
+                >
+                  {node.type === 'folder' ? (
+                    <>
+                      {isExpanded ? (
+                        <ChevronDown
+                          className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0"
+                          strokeWidth={1.5}
+                        />
+                      ) : (
+                        <ChevronRight
+                          className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0"
+                          strokeWidth={1.5}
+                        />
+                      )}
+                      {isExpanded ? (
+                        <FolderOpen
+                          className="w-3.5 h-3.5 text-[var(--text-secondary)] shrink-0"
+                          strokeWidth={1.5}
+                        />
+                      ) : (
+                        <Folder
+                          className="w-3.5 h-3.5 text-[var(--text-secondary)] shrink-0"
+                          strokeWidth={1.5}
+                        />
+                      )}
+                      <span className="truncate font-medium">{node.name}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span
+                        className="w-8 text-[10px] font-mono font-semibold text-left shrink-0 tracking-tight"
+                        style={{ color: langMeta?.color }}
+                      >
+                        {langMeta?.shortTag}
+                      </span>
+                      <span className="truncate font-mono text-[12px]">{node.name}</span>
+                    </>
+                  )}
+                </button>
+
+                {canManageFiles && (
+                  <div className="flex items-center gap-0.5 shrink-0 ml-1 card-actions">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setSelectedNode(node.id);
+                        setContextMenu({ node, x: rect.left, y: rect.bottom + 4 });
+                      }}
+                      aria-label={`Actions for ${node.name}`}
+                      className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] cursor-pointer"
+                    >
+                      <MoreVertical className="w-3 h-3" strokeWidth={1.5} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
 
-      {/* Create Folder Modal — Folder Name ONLY */}
-      {showFolderModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="new-folder-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowFolderModal(false);
+      {/* Floating Context Menu */}
+      {contextMenu && canManageFiles && (
+        <GlassPanel
+          variant="elevated"
+          role="menu"
+          aria-label={`Actions for ${contextMenu.node.name}`}
+          onClick={(e) => e.stopPropagation()}
+          className="fixed z-50 w-48 py-1.5 text-[12px]"
+          style={{
+            top: Math.min(contextMenu.y, window.innerHeight - 220),
+            left: Math.min(contextMenu.x, window.innerWidth - 200),
           }}
         >
-          <div className="w-full max-w-[380px] rounded-xl bg-[#111116]/85 backdrop-blur-xl border border-white/10 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 id="new-folder-title" className="text-[15px] font-semibold text-[#F4F4F6]">
-                New Folder
-              </h2>
+          {contextMenu.node.type === 'folder' && (
+            <>
               <button
                 type="button"
-                onClick={() => setShowFolderModal(false)}
-                aria-label="Close modal"
-                className="p-1 text-[#5C5C6E] hover:text-[#F4F4F6] cursor-pointer"
+                role="menuitem"
+                onClick={() => {
+                  const id = contextMenu.node.id;
+                  setContextMenu(null);
+                  openNewFileModal(id);
+                }}
+                className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-[var(--surface-hover)] cursor-pointer"
               >
-                <X className="w-4 h-4" strokeWidth={1.5} />
+                <FilePlus className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+                <span>New File Here</span>
               </button>
-            </div>
-
-            <form onSubmit={handleFolderSubmit} noValidate className="space-y-4">
-              <div>
-                <label
-                  htmlFor="folder-name-input"
-                  className="block text-[12px] font-medium text-[#9494A3] mb-1.5"
-                >
-                  Folder Name
-                </label>
-                <input
-                  id="folder-name-input"
-                  type="text"
-                  autoFocus
-                  value={folderName}
-                  onChange={(e) => {
-                    setFolderName(e.target.value);
-                    setFolderError(null);
-                  }}
-                  placeholder="e.g. scripts"
-                  className="w-full rounded-lg bg-[#0B0B0F] border border-white/[0.09] px-3 py-2 text-[13px] font-mono text-[#F4F4F6] placeholder-[#5C5C6E] focus:outline-none focus:border-[#5E5CE6] focus:ring-1 focus:ring-[#5E5CE6]"
-                />
-              </div>
-
-              {folders.length > 0 && (
-                <div>
-                  <label
-                    htmlFor="folder-parent-select"
-                    className="block text-[12px] font-medium text-[#9494A3] mb-1.5"
-                  >
-                    Location
-                  </label>
-                  <select
-                    id="folder-parent-select"
-                    value={folderParentId ?? '__root__'}
-                    onChange={(e) =>
-                      setFolderParentId(e.target.value === '__root__' ? null : e.target.value)
-                    }
-                    className="w-full rounded-lg bg-[#0B0B0F] border border-white/[0.09] px-3 py-2 text-[13px] font-mono text-[#F4F4F6] focus:outline-none focus:border-[#5E5CE6]"
-                  >
-                    <option value="__root__">/ (Project Root)</option>
-                    {folders.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        /{getNodePath(nodes, f.id)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {folderError && (
-                <p role="alert" className="text-[12px] text-[#EF4444]">
-                  {folderError}
-                </p>
-              )}
-
-              <div className="flex items-center justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setShowFolderModal(false)}
-                  className="px-3 py-1.5 rounded-lg text-[13px] text-[#9494A3] hover:text-[#F4F4F6] cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded-lg bg-[#5E5CE6] hover:bg-[#4F46E5] text-[#F4F4F6] text-[13px] font-medium transition-mechanical cursor-pointer"
-                >
-                  Create Folder
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Create File Modal — File Name AND Programming Language */}
-      {showFileModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="new-file-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowFileModal(false);
-          }}
-        >
-          <div className="w-full max-w-[420px] rounded-xl bg-[#111116]/85 backdrop-blur-xl border border-white/10 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 id="new-file-title" className="text-[15px] font-semibold text-[#F4F4F6]">
-                New File
-              </h2>
               <button
                 type="button"
-                onClick={() => setShowFileModal(false)}
-                aria-label="Close modal"
-                className="p-1 text-[#5C5C6E] hover:text-[#F4F4F6] cursor-pointer"
+                role="menuitem"
+                onClick={() => {
+                  const id = contextMenu.node.id;
+                  setContextMenu(null);
+                  openNewFolderModal(id);
+                }}
+                className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-[var(--surface-hover)] cursor-pointer"
               >
-                <X className="w-4 h-4" strokeWidth={1.5} />
+                <FolderPlus className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+                <span>New Folder Here</span>
               </button>
-            </div>
+            </>
+          )}
 
-            <form onSubmit={handleFileSubmit} noValidate className="space-y-4">
-              <div>
-                <label
-                  htmlFor="file-name-input"
-                  className="block text-[12px] font-medium text-[#9494A3] mb-1.5"
-                >
-                  File Name
-                </label>
-                <input
-                  id="file-name-input"
-                  type="text"
-                  autoFocus
-                  value={fileName}
-                  onChange={(e) => {
-                    setFileName(e.target.value);
-                    setFileError(null);
-                  }}
-                  placeholder={`e.g. main${getLanguageMeta(fileLanguage).extension}`}
-                  className="w-full rounded-lg bg-[#0B0B0F] border border-white/[0.09] px-3 py-2 text-[13px] font-mono text-[#F4F4F6] placeholder-[#5C5C6E] focus:outline-none focus:border-[#5E5CE6] focus:ring-1 focus:ring-[#5E5CE6]"
-                />
-              </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const node = contextMenu.node;
+              setContextMenu(null);
+              setRenameTarget(node);
+              setRenameValue(node.name);
+              setRenameError(null);
+            }}
+            className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-[var(--surface-hover)] cursor-pointer"
+          >
+            <Pencil className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+            <span>Rename</span>
+          </button>
 
-              <div>
-                <label
-                  htmlFor="file-language-select"
-                  className="block text-[12px] font-medium text-[#9494A3] mb-1.5"
-                >
-                  Programming Language
-                </label>
-                <select
-                  id="file-language-select"
-                  value={fileLanguage}
-                  onChange={(e) => setFileLanguage(e.target.value as SupportedLanguage)}
-                  className="w-full rounded-lg bg-[#0B0B0F] border border-white/[0.09] px-3 py-2 text-[13px] text-[#F4F4F6] focus:outline-none focus:border-[#5E5CE6]"
-                >
-                  {SUPPORTED_LANGUAGES.map((lang) => (
-                    <option key={lang.id} value={lang.id}>
-                      {lang.label} ({lang.extension}) — {lang.runtime}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const node = contextMenu.node;
+              setContextMenu(null);
+              setMoveTarget(node);
+              setMoveDestId(node.parentId ?? '__root__');
+              setMoveError(null);
+            }}
+            className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-[var(--surface-hover)] cursor-pointer"
+          >
+            <FolderInput className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+            <span>Move…</span>
+          </button>
 
-              {folders.length > 0 && (
-                <div>
-                  <label
-                    htmlFor="file-parent-select"
-                    className="block text-[12px] font-medium text-[#9494A3] mb-1.5"
-                  >
-                    Folder
-                  </label>
-                  <select
-                    id="file-parent-select"
-                    value={fileParentId ?? '__root__'}
-                    onChange={(e) =>
-                      setFileParentId(e.target.value === '__root__' ? null : e.target.value)
-                    }
-                    className="w-full rounded-lg bg-[#0B0B0F] border border-white/[0.09] px-3 py-2 text-[13px] font-mono text-[#F4F4F6] focus:outline-none focus:border-[#5E5CE6]"
-                  >
-                    <option value="__root__">/ (Project Root)</option>
-                    {folders.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        /{getNodePath(nodes, f.id)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+          {contextMenu.node.type === 'file' && onChangeFileLanguage && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const node = contextMenu.node;
+                setContextMenu(null);
+                setLangTarget(node);
+                setLangValue(node.language ?? 'javascript');
+              }}
+              className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-[var(--surface-hover)] cursor-pointer"
+            >
+              <Languages className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+              <span>Change Language…</span>
+            </button>
+          )}
 
-              {fileError && (
-                <p role="alert" className="text-[12px] text-[#EF4444]">
-                  {fileError}
-                </p>
-              )}
+          <div className="my-1 border-t border-[var(--border-hairline)]" />
 
-              <div className="flex items-center justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setShowFileModal(false)}
-                  className="px-3 py-1.5 rounded-lg text-[13px] text-[#9494A3] hover:text-[#F4F4F6] cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded-lg bg-[#5E5CE6] hover:bg-[#4F46E5] text-[#F4F4F6] text-[13px] font-medium transition-mechanical cursor-pointer"
-                >
-                  Create File
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const node = contextMenu.node;
+              setContextMenu(null);
+              setDeleteTarget(node);
+            }}
+            className="w-full px-3 py-1.5 text-left flex items-center gap-2 text-[#fca5a5] hover:bg-[var(--state-danger-bg)] cursor-pointer"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete</span>
+          </button>
+        </GlassPanel>
       )}
 
-      {/* Rename Node Modal */}
-      {renameNode && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="rename-node-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setRenameNode(null);
-          }}
-        >
-          <div className="w-full max-w-[380px] rounded-xl bg-[#111116]/85 backdrop-blur-xl border border-white/10 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 id="rename-node-title" className="text-[15px] font-semibold text-[#F4F4F6]">
-                Rename {renameNode.type === 'folder' ? 'Folder' : 'File'}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setRenameNode(null)}
-                aria-label="Close modal"
-                className="p-1 text-[#5C5C6E] hover:text-[#F4F4F6] cursor-pointer"
-              >
-                <X className="w-4 h-4" strokeWidth={1.5} />
-              </button>
-            </div>
-            <form onSubmit={handleRenameSubmit} noValidate className="space-y-4">
-              <div>
-                <label
-                  htmlFor="rename-node-input"
-                  className="block text-[12px] font-medium text-[#9494A3] mb-1.5"
-                >
-                  Name
-                </label>
-                <input
-                  id="rename-node-input"
-                  type="text"
-                  autoFocus
-                  value={renameValue}
-                  onChange={(e) => {
-                    setRenameValue(e.target.value);
-                    setRenameError(null);
-                  }}
-                  className="w-full rounded-lg bg-[#0B0B0F] border border-white/[0.09] px-3 py-2 text-[13px] font-mono text-[#F4F4F6] focus:outline-none focus:border-[#5E5CE6]"
-                />
-              </div>
-              {renameError && (
-                <p role="alert" className="text-[12px] text-[#EF4444]">
-                  {renameError}
-                </p>
-              )}
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRenameNode(null)}
-                  className="px-3 py-1.5 rounded-lg text-[13px] text-[#9494A3] hover:text-[#F4F4F6] cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded-lg bg-[#5E5CE6] hover:bg-[#4F46E5] text-[#F4F4F6] text-[13px] font-medium cursor-pointer"
-                >
-                  Rename
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Create Folder Dialog (Name ONLY) */}
+      <Dialog
+        open={showFolderModal}
+        onClose={() => setShowFolderModal(false)}
+        title="New Folder"
+        maxWidthClass="max-w-[380px]"
+      >
+        <form onSubmit={handleFolderSubmit} noValidate className="space-y-4">
+          <FormField id="folder-name-input" label="Folder Name" required error={folderError}>
+            <TextInput
+              id="folder-name-input"
+              type="text"
+              autoFocus
+              value={folderName}
+              onChange={(e) => {
+                setFolderName(e.target.value);
+                setFolderError(null);
+              }}
+              placeholder="e.g. scripts"
+              className="font-mono"
+              hasError={Boolean(folderError)}
+            />
+          </FormField>
 
-      {/* Move Node Modal */}
-      {moveNodeTarget && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="move-node-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setMoveNodeTarget(null);
-          }}
-        >
-          <div className="w-full max-w-[380px] rounded-xl bg-[#111116]/85 backdrop-blur-xl border border-white/10 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 id="move-node-title" className="text-[15px] font-semibold text-[#F4F4F6]">
-                Move “{moveNodeTarget.name}”
-              </h2>
-              <button
-                type="button"
-                onClick={() => setMoveNodeTarget(null)}
-                aria-label="Close modal"
-                className="p-1 text-[#5C5C6E] hover:text-[#F4F4F6] cursor-pointer"
+          {folders.length > 0 && (
+            <FormField id="folder-parent-select" label="Location">
+              <select
+                id="folder-parent-select"
+                value={folderParentId ?? '__root__'}
+                onChange={(e) =>
+                  setFolderParentId(e.target.value === '__root__' ? null : e.target.value)
+                }
+                className="w-full rounded-lg bg-[var(--surface-base)] border border-white/[0.09] px-3 py-2 text-[13px] font-mono text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
               >
-                <X className="w-4 h-4" strokeWidth={1.5} />
-              </button>
-            </div>
-            <form onSubmit={handleMoveSubmit} noValidate className="space-y-4">
-              <div>
-                <label
-                  htmlFor="move-dest-select"
-                  className="block text-[12px] font-medium text-[#9494A3] mb-1.5"
-                >
-                  Destination Folder
-                </label>
-                <select
-                  id="move-dest-select"
-                  value={moveDestId}
-                  onChange={(e) => {
-                    setMoveDestId(e.target.value);
-                    setMoveError(null);
-                  }}
-                  className="w-full rounded-lg bg-[#0B0B0F] border border-white/[0.09] px-3 py-2 text-[13px] font-mono text-[#F4F4F6] focus:outline-none focus:border-[#5E5CE6]"
-                >
-                  <option value="__root__">/ (Project Root)</option>
-                  {folders
-                    .filter(
-                      (f) =>
-                        moveNodeTarget.type !== 'folder' ||
-                        !isDescendantOf(nodes, f.id, moveNodeTarget.id)
-                    )
-                    .map((f) => (
-                      <option key={f.id} value={f.id}>
-                        /{getNodePath(nodes, f.id)}
-                      </option>
-                    ))}
-                </select>
-              </div>
-              {moveError && (
-                <p role="alert" className="text-[12px] text-[#EF4444]">
-                  {moveError}
-                </p>
-              )}
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMoveNodeTarget(null)}
-                  className="px-3 py-1.5 rounded-lg text-[13px] text-[#9494A3] hover:text-[#F4F4F6] cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded-lg bg-[#5E5CE6] hover:bg-[#4F46E5] text-[#F4F4F6] text-[13px] font-medium cursor-pointer"
-                >
-                  Move Here
-                </button>
-              </div>
-            </form>
+                <option value="__root__">/ (Project Root)</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    /{getNodePath(nodes, f.id)}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <GlassButton variant="ghost" onClick={() => setShowFolderModal(false)}>
+              Cancel
+            </GlassButton>
+            <GlassButton type="submit" variant="primary" loading={submittingFolder}>
+              {submittingFolder ? 'Creating…' : 'Create Folder'}
+            </GlassButton>
           </div>
+        </form>
+      </Dialog>
+
+      {/* Create File Dialog (File Name + Language + Extension Rule Preview) */}
+      <Dialog
+        open={showFileModal}
+        onClose={() => setShowFileModal(false)}
+        title="New File"
+        description="Every file in DevSync carries its own language configuration."
+        maxWidthClass="max-w-[420px]"
+      >
+        <form onSubmit={handleFileSubmit} noValidate className="space-y-4">
+          <FormField
+            id="file-name-input"
+            label="File Name"
+            required
+            error={fileError}
+            hint={
+              previewFileName
+                ? `Will be created as ${previewFileName}`
+                : `No extension? "${getLanguageMeta(fileLanguage).extension}" is appended automatically.`
+            }
+          >
+            <TextInput
+              id="file-name-input"
+              type="text"
+              autoFocus
+              value={fileName}
+              onChange={(e) => {
+                setFileName(e.target.value);
+                setFileError(null);
+              }}
+              placeholder={`e.g. main${getLanguageMeta(fileLanguage).extension}`}
+              className="font-mono"
+              hasError={Boolean(fileError)}
+            />
+          </FormField>
+
+          <FormField id="file-language-select" label="Programming Language" required>
+            <select
+              id="file-language-select"
+              value={fileLanguage}
+              onChange={(e) => setFileLanguage(e.target.value as SupportedLanguage)}
+              className="w-full rounded-lg bg-[var(--surface-base)] border border-white/[0.09] px-3 py-2 text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+            >
+              {languageOptions.map((lang) => (
+                <option key={lang.id} value={lang.id}>
+                  {lang.label} ({lang.ext})
+                </option>
+              ))}
+            </select>
+          </FormField>
+
+          {folders.length > 0 && (
+            <FormField id="file-parent-select" label="Folder">
+              <select
+                id="file-parent-select"
+                value={fileParentId ?? '__root__'}
+                onChange={(e) =>
+                  setFileParentId(e.target.value === '__root__' ? null : e.target.value)
+                }
+                className="w-full rounded-lg bg-[var(--surface-base)] border border-white/[0.09] px-3 py-2 text-[13px] font-mono text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+              >
+                <option value="__root__">/ (Project Root)</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    /{getNodePath(nodes, f.id)}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <GlassButton variant="ghost" onClick={() => setShowFileModal(false)}>
+              Cancel
+            </GlassButton>
+            <GlassButton type="submit" variant="primary" loading={submittingFile}>
+              {submittingFile ? 'Creating…' : 'Create File'}
+            </GlassButton>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* Rename Node Dialog */}
+      <Dialog
+        open={Boolean(renameTarget)}
+        onClose={() => setRenameTarget(null)}
+        title={`Rename ${renameTarget?.type === 'folder' ? 'Folder' : 'File'}`}
+        maxWidthClass="max-w-[380px]"
+      >
+        <form onSubmit={handleRenameSubmit} noValidate className="space-y-4">
+          <FormField id="rename-node-input" label="Name" required error={renameError}>
+            <TextInput
+              id="rename-node-input"
+              type="text"
+              autoFocus
+              value={renameValue}
+              onChange={(e) => {
+                setRenameValue(e.target.value);
+                setRenameError(null);
+              }}
+              className="font-mono"
+              hasError={Boolean(renameError)}
+            />
+          </FormField>
+          <div className="flex items-center justify-end gap-2">
+            <GlassButton variant="ghost" onClick={() => setRenameTarget(null)}>
+              Cancel
+            </GlassButton>
+            <GlassButton type="submit" variant="primary" loading={submittingRename}>
+              {submittingRename ? 'Renaming…' : 'Rename'}
+            </GlassButton>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* Move Node Dialog */}
+      <Dialog
+        open={Boolean(moveTarget)}
+        onClose={() => setMoveTarget(null)}
+        title={`Move “${moveTarget?.name ?? ''}”`}
+        maxWidthClass="max-w-[380px]"
+      >
+        <form onSubmit={handleMoveSubmit} noValidate className="space-y-4">
+          <FormField id="move-dest-select" label="Destination Folder" error={moveError}>
+            <select
+              id="move-dest-select"
+              value={moveDestId}
+              onChange={(e) => {
+                setMoveDestId(e.target.value);
+                setMoveError(null);
+              }}
+              className="w-full rounded-lg bg-[var(--surface-base)] border border-white/[0.09] px-3 py-2 text-[13px] font-mono text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+            >
+              <option value="__root__">/ (Project Root)</option>
+              {folders
+                .filter(
+                  (f) =>
+                    !moveTarget ||
+                    moveTarget.type !== 'folder' ||
+                    !isDescendantOf(nodes, f.id, moveTarget.id)
+                )
+                .map((f) => (
+                  <option key={f.id} value={f.id}>
+                    /{getNodePath(nodes, f.id)}
+                  </option>
+                ))}
+            </select>
+          </FormField>
+          <div className="flex items-center justify-end gap-2">
+            <GlassButton variant="ghost" onClick={() => setMoveTarget(null)}>
+              Cancel
+            </GlassButton>
+            <GlassButton type="submit" variant="primary" loading={submittingMove}>
+              {submittingMove ? 'Moving…' : 'Move Here'}
+            </GlassButton>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* Change Language Dialog */}
+      <Dialog
+        open={Boolean(langTarget)}
+        onClose={() => setLangTarget(null)}
+        title={`Change Language for “${langTarget?.name ?? ''}”`}
+        maxWidthClass="max-w-[380px]"
+      >
+        <form onSubmit={handleLanguageSubmit} className="space-y-4">
+          <FormField id="change-file-lang" label="Programming Language">
+            <select
+              id="change-file-lang"
+              value={langValue}
+              onChange={(e) => setLangValue(e.target.value as SupportedLanguage)}
+              className="w-full rounded-lg bg-[var(--surface-base)] border border-white/[0.09] px-3 py-2 text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+            >
+              {languageOptions.map((lang) => (
+                <option key={lang.id} value={lang.id}>
+                  {lang.label} ({lang.ext})
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <div className="flex items-center justify-end gap-2">
+            <GlassButton variant="ghost" onClick={() => setLangTarget(null)}>
+              Cancel
+            </GlassButton>
+            <GlassButton type="submit" variant="primary" loading={submittingLang}>
+              {submittingLang ? 'Updating…' : 'Update Language'}
+            </GlassButton>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* Delete Node Confirmation Dialog */}
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        title={`Delete “${deleteTarget?.name ?? ''}”?`}
+        description={
+          deleteTarget?.type === 'folder'
+            ? 'This permanently deletes this folder and every file inside it.'
+            : 'This permanently deletes this file from the project.'
+        }
+        maxWidthClass="max-w-[380px]"
+      >
+        <div className="flex items-center justify-end gap-2 pt-3">
+          <GlassButton variant="ghost" autoFocus onClick={() => setDeleteTarget(null)}>
+            Cancel
+          </GlassButton>
+          <GlassButton variant="danger" loading={submittingDelete} onClick={handleDeleteConfirm}>
+            {submittingDelete ? 'Deleting…' : 'Delete'}
+          </GlassButton>
         </div>
-      )}
+      </Dialog>
     </aside>
   );
 }

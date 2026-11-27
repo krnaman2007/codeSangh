@@ -244,6 +244,29 @@ dialog::backdrop {
   letter-spacing: 0;
 }
 
+.devsync-breakpoint-glyph {
+  background: #ef4444;
+  border-radius: 9999px;
+  width: 9px !important;
+  height: 9px !important;
+  margin-left: 5px;
+  margin-top: 6px;
+}
+
+.devsync-debug-active-line {
+  background: rgba(234, 179, 8, 0.14);
+}
+
+.devsync-debug-arrow-glyph {
+  border-left: 6px solid #eab308;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  width: 0 !important;
+  height: 0 !important;
+  margin-left: 6px;
+  margin-top: 7px;
+}
+
 /* Card hover/focus-within action reveal */
 .card-actions {
   opacity: 0;

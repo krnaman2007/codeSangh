@@ -69,6 +69,7 @@ const KEYWORDS: Record<SupportedLanguage, Set<string>> = {
     'font-size', 'line-height', 'border-radius', 'transition', 'opacity', 'root',
     'media', 'keyframes', 'import', 'important',
   ]),
+  text: new Set(),
 };
 
 export function tokenizeLine(line: string, language: SupportedLanguage): SyntaxToken[] {
