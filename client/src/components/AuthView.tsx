@@ -284,7 +284,7 @@ export function AuthView({ initialMode }: AuthViewProps) {
                   }}
                   placeholder="Alex Rivera"
                   autoComplete="name"
-                  enterKeyhint="next"
+                  enterKeyHint="next"
                   hasError={Boolean(fieldErrors.name)}
                   aria-describedby={fieldErrors.name ? 'auth-name-error' : 'auth-name-hint'}
                   leadingIcon={<User className="w-4 h-4" strokeWidth={1.5} />}
@@ -315,7 +315,7 @@ export function AuthView({ initialMode }: AuthViewProps) {
                 autoCorrect="off"
                 autoCapitalize="none"
                 spellCheck={false}
-                enterKeyhint="next"
+                enterKeyHint="next"
                 hasError={Boolean(fieldErrors.email)}
                 aria-describedby={fieldErrors.email ? 'auth-email-error' : undefined}
                 leadingIcon={<Mail className="w-4 h-4" strokeWidth={1.5} />}
@@ -352,7 +352,7 @@ export function AuthView({ initialMode }: AuthViewProps) {
                 }}
                 placeholder={mode === 'register' ? 'Minimum 8 characters' : 'Enter your password'}
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                enterKeyhint="done"
+                enterKeyHint="done"
                 hasError={Boolean(fieldErrors.password)}
                 aria-describedby={
                   fieldErrors.password

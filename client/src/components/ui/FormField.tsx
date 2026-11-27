@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode } from 'react';
+import type { InputHTMLAttributes, ReactNode, Ref } from 'react';
 
 export interface FormFieldProps {
   id: string;
@@ -59,6 +59,7 @@ export interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
   hasError?: boolean;
   leadingIcon?: ReactNode;
   trailingAction?: ReactNode;
+  ref?: Ref<HTMLInputElement>;
 }
 
 export function TextInput({
@@ -66,6 +67,7 @@ export function TextInput({
   leadingIcon,
   trailingAction,
   className = '',
+  ref,
   ...rest
 }: TextInputProps) {
   return (
@@ -76,6 +78,7 @@ export function TextInput({
         </span>
       )}
       <input
+        ref={ref}
         aria-invalid={hasError ? 'true' : undefined}
         className={`w-full rounded-lg bg-[var(--surface-base)] border px-3 py-2 text-[13px] text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-mechanical focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] ${
           hasError ? 'border-[var(--state-danger-border)]' : 'border-white/[0.09]'
