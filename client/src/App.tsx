@@ -2,11 +2,12 @@ import { useEffect } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { LandingPage } from './components/LandingPage';
 import { AuthView } from './components/AuthView';
+import { DashboardPage } from './components/DashboardPage';
+import { ProjectRouteGate } from './components/ProjectRouteGate';
 import { NotFoundPage } from './components/NotFoundPage';
 import { DemoWorkspaceShell } from './components/DemoWorkspaceShell';
 import { ToastContainer } from './components/BrandMark';
 import { ProtectedRoute, PublicOnlyRoute } from './routes/guards';
-import { getInitials, useAuth } from './state/authStore';
 import { useUiStore } from './state/uiStore';
 
 const ROUTE_TITLES: Record<string, string> = {
@@ -33,17 +34,7 @@ function DocumentTitleManager() {
 
 export default function App() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
-  const { toasts, dismissToast, pushToast } = useUiStore();
-
-  const currentAccount = user
-    ? {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        initials: getInitials(user.name),
-      }
-    : undefined;
+  const { toasts, dismissToast } = useUiStore();
 
   return (
     <>
@@ -82,14 +73,7 @@ export default function App() {
           path="/dashboard"
           element={
             <ProtectedRoute>
-              <DemoWorkspaceShell
-                mode="dashboard"
-                account={currentAccount}
-                onSignOut={() => {
-                  void logout();
-                  pushToast('Signed out', 'info');
-                }}
-              />
+              <DashboardPage />
             </ProtectedRoute>
           }
         />
@@ -98,14 +82,7 @@ export default function App() {
           path="/project/:projectId"
           element={
             <ProtectedRoute>
-              <DemoWorkspaceShell
-                mode="workspace"
-                account={currentAccount}
-                onSignOut={() => {
-                  void logout();
-                  pushToast('Signed out', 'info');
-                }}
-              />
+              <ProjectRouteGate />
             </ProtectedRoute>
           }
         />

@@ -10,15 +10,17 @@ import type {
 } from '../types/devsync';
 import { DEMO_USER, createSeedProjects } from '../data/seedProjects';
 import {
+  countProjectFiles,
   createFileNode,
   createFolderNode,
   deleteFileNode,
+  deriveProjectLanguages,
   moveFileNode,
   renameFileNode,
 } from '../utils/fileTree';
 import { getPermissionsForRole } from '../utils/permissions';
 import { useUiStore } from '../state/uiStore';
-import { Dashboard } from './Dashboard';
+import { Dashboard, type DashboardProjectItem } from './Dashboard';
 import { Workspace } from './Workspace';
 import { CommandPalette } from './CommandPalette';
 
@@ -51,6 +53,7 @@ export function DemoWorkspaceShell({
   const { pushToast, commandPaletteOpen, setCommandPaletteOpen } = useUiStore();
 
   const [projects, setProjects] = useState<Project[]>(loadDemoProjects);
+  const [searchQuery, setSearchQuery] = useState('');
   const [activeProjectId, setActiveProjectId] = useState<string>(() => {
     if (routeProjectId) return routeProjectId;
     const initial = loadDemoProjects();
@@ -159,6 +162,7 @@ export function DemoWorkspaceShell({
       navigate('/dashboard');
     }
     if (target) pushToast(`Deleted "${target.name}"`, 'info');
+    return {};
   };
 
   const handleChangeDemoRole = (projectId: string, role: Role) => {
@@ -370,6 +374,24 @@ export function DemoWorkspaceShell({
     if (removed) pushToast(`Revoked access for ${removed.name}`, 'info');
   };
 
+  const dashboardItems: DashboardProjectItem[] = projects
+    .filter((p) =>
+      searchQuery.trim()
+        ? p.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
+        : true
+    )
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      role: p.currentUserRole,
+      ownerName: p.ownerName,
+      updatedAt: p.updatedAt,
+      fileCount: countProjectFiles(p.nodes),
+      folderCount: p.nodes.filter((n) => n.type === 'folder').length,
+      collaboratorCount: p.collaborators.length,
+      languages: deriveProjectLanguages(p.nodes),
+    }));
+
   const activePerms = activeProject
     ? getPermissionsForRole(activeProject.currentUserRole)
     : null;
@@ -379,7 +401,9 @@ export function DemoWorkspaceShell({
       {mode === 'dashboard' && (
         <Dashboard
           user={account}
-          projects={projects}
+          projects={dashboardItems}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
           onOpenProject={handleOpenProject}
           onCreateProject={handleCreateProject}
           onRenameProject={handleRenameProject}
