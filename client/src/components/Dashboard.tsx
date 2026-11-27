@@ -263,6 +263,16 @@ export function Dashboard({
                 <Plus className="w-4 h-4" strokeWidth={1.75} />
                 <span>New Project</span>
               </GlassButton>
+
+              <button
+                type="button"
+                onClick={onSignOut}
+                aria-label="Sign out"
+                title="Sign out"
+                className="md:hidden p-2 rounded-lg glass-surface text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" strokeWidth={1.5} />
+              </button>
             </div>
           </div>
 

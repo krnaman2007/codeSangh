@@ -62,7 +62,7 @@ export function ToastContainer({
         <div
           key={toast.id}
           role="status"
-          className="pointer-events-auto flex items-start gap-3 rounded-lg bg-[#111116]/85 backdrop-blur-xl border border-white/10 px-3.5 py-2.5 text-sm text-[#F4F4F6] transition-mechanical"
+          className="pointer-events-auto flex items-start gap-3 rounded-lg glass-surface-elevated px-3.5 py-2.5 text-sm text-[var(--text-primary)] transition-mechanical"
         >
           {toast.variant === 'success' && (
             <CheckCircle2 className="w-4 h-4 text-[#22C55E] shrink-0 mt-0.5" strokeWidth={1.5} />

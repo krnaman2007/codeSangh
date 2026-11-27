@@ -67,7 +67,9 @@ export function WorkspacePage() {
   const runFileMutation = useRunFileMutation(projectId);
 
   const [activeSidePanel, setActiveSidePanel] = useState<SideRailPanel>('explorer');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
+  );
   const [bottomTab, setBottomTab] = useState<WorkspaceBottomTab>('output');
   const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
   const [openTabIds, setOpenTabIds] = useState<string[]>([]);
@@ -618,6 +620,18 @@ export function WorkspacePage() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-[var(--surface-canvas)] text-[var(--text-primary)] flex flex-col">
+      {/* Minimum-width notice on narrow mobile screens */}
+      <div className="sm:hidden px-3 py-2 bg-[var(--state-warning-bg)] border-b border-[var(--state-warning-border)] text-[11px] text-[#fde047] flex items-center justify-between gap-2 shrink-0">
+        <span>IDE layout works best at 768px+ viewport width.</span>
+        <button
+          type="button"
+          onClick={() => navigate('/dashboard')}
+          className="underline font-medium shrink-0 cursor-pointer"
+        >
+          Dashboard
+        </button>
+      </div>
+
       {/* Top Workspace Bar */}
       <header className="h-12 px-3 glass-toolbar border-b flex items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-2 min-w-0">

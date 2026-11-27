@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import {
-  Search,
-  FileCode2,
-  Play,
-  FilePlus,
-  FolderPlus,
-  Users,
-  LayoutDashboard,
-  FolderKanban,
   Eye,
+  FileCode2,
+  FilePlus,
+  FolderKanban,
+  FolderPlus,
+  LayoutDashboard,
+  Play,
+  Search,
+  Users,
 } from 'lucide-react';
 import type { FileNode, Project } from '../types/devsync';
 import { getLanguageMeta, getNodePath } from '../utils/fileTree';
+import { Dialog } from './ui';
 
 interface CommandItem {
   id: string;
@@ -211,13 +212,8 @@ export function CommandPalette({
     setSelectedIndex(0);
   }, [query]);
 
-  if (!open) return null;
-
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
-    } else if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown') {
       e.preventDefault();
       setSelectedIndex((prev) => (filtered.length > 0 ? (prev + 1) % filtered.length : 0));
     } else if (e.key === 'ArrowUp') {
@@ -235,18 +231,17 @@ export function CommandPalette({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Command Palette"
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/65 pt-[14vh] px-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Command Palette"
+      ariaLabel="Command Palette"
+      hideHeader
+      maxWidthClass="max-w-[540px]"
     >
-      <div className="w-full max-w-[540px] rounded-xl bg-[#111116]/85 backdrop-blur-xl border border-white/10 overflow-hidden">
-        <div className="flex items-center gap-3 px-4 h-12 border-b border-white/[0.08]">
-          <Search className="w-4 h-4 text-[#5C5C6E] shrink-0" strokeWidth={1.5} />
+      <div className="-m-6 overflow-hidden rounded-xl">
+        <div className="flex items-center gap-3 px-4 h-12 border-b border-[var(--border-hairline)]">
+          <Search className="w-4 h-4 text-[var(--text-muted)] shrink-0" strokeWidth={1.5} />
           <input
             type="text"
             autoFocus
@@ -255,16 +250,16 @@ export function CommandPalette({
             onKeyDown={handleKeyDown}
             placeholder="Jump to file, run code, or switch project..."
             aria-label="Command palette search"
-            className="flex-1 bg-transparent text-[13px] text-[#F4F4F6] placeholder-[#5C5C6E] focus:outline-none"
+            className="flex-1 bg-transparent text-[13px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none"
           />
-          <kbd className="px-1.5 py-0.5 text-[10px] font-mono text-[#5C5C6E] bg-[#0B0B0F] border border-white/[0.08] rounded">
+          <kbd className="px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-muted)] bg-[var(--surface-base)] border border-[var(--border-hairline)] rounded">
             ESC
           </kbd>
         </div>
 
         <div className="max-h-[340px] overflow-y-auto py-2">
           {filtered.length === 0 ? (
-            <p className="px-4 py-8 text-center text-[13px] text-[#5C5C6E]">
+            <p className="px-4 py-8 text-center text-[13px] text-[var(--text-muted)]">
               No matching files or commands.
             </p>
           ) : (
@@ -284,22 +279,22 @@ export function CommandPalette({
                     item.disabled
                       ? 'opacity-40 cursor-not-allowed'
                       : isHighlighted
-                      ? 'bg-[#18181F] text-[#F4F4F6] cursor-pointer'
-                      : 'text-[#9494A3] hover:text-[#F4F4F6] cursor-pointer'
+                      ? 'bg-[var(--surface-hover)] text-[var(--text-primary)] cursor-pointer'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer'
                   }`}
                 >
                   <span className="flex items-center gap-2.5 min-w-0">
                     <Icon
                       className={`w-4 h-4 shrink-0 ${
-                        isHighlighted ? 'text-[#5E5CE6]' : 'text-[#5C5C6E]'
+                        isHighlighted ? 'text-[var(--accent-primary)]' : 'text-[var(--text-muted)]'
                       }`}
                       strokeWidth={1.5}
                     />
                     <span className="truncate font-mono text-[12px]">{item.label}</span>
                   </span>
-                  <span className="flex items-center gap-2 shrink-0 text-[11px] font-mono text-[#5C5C6E]">
+                  <span className="flex items-center gap-2 shrink-0 text-[11px] font-mono text-[var(--text-muted)]">
                     {item.hint && <span>{item.hint}</span>}
-                    <span className="text-[10px] text-[#5C5C6E]/70">{item.group}</span>
+                    <span className="text-[10px] opacity-75">{item.group}</span>
                   </span>
                 </button>
               );
@@ -307,6 +302,6 @@ export function CommandPalette({
           )}
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

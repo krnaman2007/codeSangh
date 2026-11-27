@@ -1,14 +1,22 @@
-import { useEffect } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { LandingPage } from './components/LandingPage';
 import { AuthView } from './components/AuthView';
-import { DashboardPage } from './components/DashboardPage';
-import { WorkspacePage } from './components/WorkspacePage';
 import { NotFoundPage } from './components/NotFoundPage';
-import { DemoWorkspaceShell } from './components/DemoWorkspaceShell';
-import { ToastContainer } from './components/BrandMark';
+import { ToastContainer, BrandLogo } from './components/BrandMark';
+import { GlassPanel, Skeleton } from './components/ui';
 import { ProtectedRoute, PublicOnlyRoute } from './routes/guards';
 import { useUiStore } from './state/uiStore';
+
+const DashboardPage = lazy(() =>
+  import('./components/DashboardPage').then((m) => ({ default: m.DashboardPage }))
+);
+const WorkspacePage = lazy(() =>
+  import('./components/WorkspacePage').then((m) => ({ default: m.WorkspacePage }))
+);
+const DemoWorkspaceShell = lazy(() =>
+  import('./components/DemoWorkspaceShell').then((m) => ({ default: m.DemoWorkspaceShell }))
+);
 
 const ROUTE_TITLES: Record<string, string> = {
   '/': 'DevSync — Collaborative Browser IDE',
@@ -17,6 +25,23 @@ const ROUTE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard | DevSync',
   '/demo': 'Live Demo Workspace | DevSync',
 };
+
+function RouteFallback() {
+  return (
+    <div className="min-h-screen bg-[var(--surface-canvas)] flex items-center justify-center p-6">
+      <GlassPanel className="w-full max-w-[360px] p-6 space-y-3">
+        <div className="flex items-center gap-2.5">
+          <BrandLogo size={20} />
+          <span className="text-[14px] font-semibold text-[var(--text-primary)]">
+            Loading view…
+          </span>
+        </div>
+        <Skeleton className="h-3 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
+      </GlassPanel>
+    </div>
+  );
+}
 
 function DocumentTitleManager() {
   const { pathname } = useLocation();
@@ -40,57 +65,59 @@ export default function App() {
     <>
       <DocumentTitleManager />
 
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <LandingPage
-              onGetStarted={() => navigate('/login')}
-              onOpenDemo={() => navigate('/demo')}
-            />
-          }
-        />
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <LandingPage
+                onGetStarted={() => navigate('/login')}
+                onOpenDemo={() => navigate('/demo')}
+              />
+            }
+          />
 
-        <Route
-          path="/login"
-          element={
-            <PublicOnlyRoute>
-              <AuthView initialMode="login" />
-            </PublicOnlyRoute>
-          }
-        />
+          <Route
+            path="/login"
+            element={
+              <PublicOnlyRoute>
+                <AuthView initialMode="login" />
+              </PublicOnlyRoute>
+            }
+          />
 
-        <Route
-          path="/register"
-          element={
-            <PublicOnlyRoute>
-              <AuthView initialMode="register" />
-            </PublicOnlyRoute>
-          }
-        />
+          <Route
+            path="/register"
+            element={
+              <PublicOnlyRoute>
+                <AuthView initialMode="register" />
+              </PublicOnlyRoute>
+            }
+          />
 
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <DashboardPage />
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <DashboardPage />
+              </ProtectedRoute>
+            }
+          />
 
-        <Route
-          path="/project/:projectId"
-          element={
-            <ProtectedRoute>
-              <WorkspacePage />
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/project/:projectId"
+            element={
+              <ProtectedRoute>
+                <WorkspacePage />
+              </ProtectedRoute>
+            }
+          />
 
-        <Route path="/demo" element={<DemoWorkspaceShell mode="workspace" />} />
+          <Route path="/demo" element={<DemoWorkspaceShell mode="workspace" />} />
 
-        <Route path="*" element={<NotFoundPage />} />
-      </Routes>
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </Suspense>
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
