@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Check,
+  Loader2,
+  LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -11,26 +13,27 @@ import {
   Share2,
 } from 'lucide-react';
 import { ApiClientError } from '../api/errors';
-import { useProjectsQuery, useProjectDetailsQuery, useRenameProjectMutation } from '../hooks/useProjects';
+import type { ApiExecutionRecord } from '../api/types';
+import { useLeaveProjectMutation, useProjectsQuery, useProjectDetailsQuery, useRenameProjectMutation } from '../hooks/useProjects';
 import { useFileDetailQuery, useLanguagesQuery, useNodeMutations, useProjectTreeQuery } from '../hooks/useProjectNodes';
-import { getPermissionsForRole } from '../utils/permissions';
+import { useRunFileMutation } from '../hooks/useExecutions';
+import { usePermissions } from '../hooks/usePermissions';
 import { getNodeBreadcrumb, getSortedChildren } from '../utils/fileTree';
 import { detectPlatform, matchWorkspaceShortcut } from '../utils/shortcuts';
-import { useAuth, getInitials } from '../state/authStore';
 import { useUiStore } from '../state/uiStore';
 import type { FileNode, Project, SupportedLanguage } from '../types/devsync';
 import { BrandLogo } from './BrandMark';
 import { FileExplorer } from './FileExplorer';
 import { MonacoCodeEditor, type FileSaveState, type OpenEditorFile } from './MonacoCodeEditor';
-import { BottomPanel, type BottomTab } from './BottomPanel';
+import { ExecutionPanel, type WorkspaceBottomTab } from './ExecutionPanel';
+import { CollaboratorsDialog } from './CollaboratorsDialog';
 import { CommandPalette } from './CommandPalette';
 import { ProjectErrorState } from './ProjectErrorState';
-import { GlassButton, GlassPanel, RoleChip, Skeleton } from './ui';
+import { Dialog, GlassButton, GlassPanel, RoleChip, Skeleton, Tooltip } from './ui';
 
 export function WorkspacePage() {
   const { projectId = '' } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const { pushToast, commandPaletteOpen, setCommandPaletteOpen } = useUiStore();
 
   const projectQuery = useProjectDetailsQuery(projectId);
@@ -38,16 +41,22 @@ export function WorkspacePage() {
   const languagesQuery = useLanguagesQuery();
   const dashboardQuery = useProjectsQuery('');
   const renameProjectMutation = useRenameProjectMutation();
+  const leaveProjectMutation = useLeaveProjectMutation();
   const nodeMutations = useNodeMutations(projectId);
+  const runFileMutation = useRunFileMutation(projectId);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [bottomTab, setBottomTab] = useState<BottomTab>('output');
+  const [bottomTab, setBottomTab] = useState<WorkspaceBottomTab>('output');
   const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
   const [openTabIds, setOpenTabIds] = useState<string[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loadedContents, setLoadedContents] = useState<Record<string, string>>({});
   const [saveStates, setSaveStates] = useState<Record<string, FileSaveState>>({});
+  const [stdin, setStdin] = useState('');
+  const [latestExecution, setLatestExecution] = useState<ApiExecutionRecord | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
 
   // Explorer focus & shortcut triggers
   const [explorerFocused, setExplorerFocused] = useState(false);
@@ -67,13 +76,14 @@ export function WorkspacePage() {
 
   const activeFileDetailQuery = useFileDetailQuery(projectId, activeFileId);
 
-  // Reset per-project local workspace UI state when switching projectId
   useEffect(() => {
     setOpenTabIds([]);
     setActiveFileId(null);
     setDrafts({});
     setLoadedContents({});
     setSaveStates({});
+    setLatestExecution(null);
+    setStdin('');
     setSelectedNodeId(null);
     setEditingTitle(false);
     Object.values(saveTimersRef.current).forEach((id) => window.clearTimeout(id));
@@ -93,7 +103,6 @@ export function WorkspacePage() {
     }));
   }, [treeQuery.data?.nodes, drafts, loadedContents]);
 
-  // Auto-open first file on initial project tree load
   useEffect(() => {
     if (openTabIds.length === 0 && treeNodes.length > 0 && !activeFileId) {
       const sortedRoot = getSortedChildren(treeNodes, null);
@@ -107,7 +116,6 @@ export function WorkspacePage() {
     }
   }, [treeNodes, openTabIds.length, activeFileId]);
 
-  // Clean up closed/deleted tabs when server tree updates
   useEffect(() => {
     if (!treeQuery.data?.nodes) return;
     const validIds = new Set(treeQuery.data.nodes.map((n) => n.id));
@@ -123,7 +131,6 @@ export function WorkspacePage() {
     });
   }, [treeQuery.data?.nodes, activeFileId]);
 
-  // Cache fetched file content when file detail arrives
   useEffect(() => {
     const file = activeFileDetailQuery.data?.file;
     if (!file) return;
@@ -134,8 +141,9 @@ export function WorkspacePage() {
   }, [activeFileDetailQuery.data?.file]);
 
   const role = projectQuery.data?.myRole ?? 'viewer';
-  const perms = getPermissionsForRole(role);
+  const perms = usePermissions(role);
   const projectName = projectQuery.data?.project.name ?? '';
+  const languages = languagesQuery.data?.languages ?? [];
 
   const openFile = useCallback((fileId: string) => {
     setOpenTabIds((prev) => (prev.includes(fileId) ? prev : [...prev, fileId]));
@@ -203,6 +211,73 @@ export function WorkspacePage() {
     [perms.canEditCode, saveFileNow]
   );
 
+  const activeNode = useMemo(
+    () => treeNodes.find((n) => n.id === activeFileId && n.type === 'file') ?? null,
+    [treeNodes, activeFileId]
+  );
+
+  const activeLanguageMode = useMemo(() => {
+    if (!activeNode?.language) return 'none';
+    const reg = languages.find((l) => l.key === activeNode.language);
+    if (reg) return reg.mode;
+    if (activeNode.language === 'html') return 'preview';
+    if (activeNode.language === 'css' || activeNode.language === 'text') return 'none';
+    return 'run';
+  }, [activeNode?.language, languages]);
+
+  const handleRunActiveFile = useCallback(async () => {
+    if (!perms.canRunCode) {
+      pushToast('Execution blocked', 'error', perms.denialReason('runCode'));
+      return;
+    }
+    if (!activeNode) {
+      pushToast('No file selected', 'info', 'Open a file first to run it.');
+      return;
+    }
+    if (activeLanguageMode === 'preview') {
+      pushToast('HTML Preview active', 'info', 'HTML files render live in the preview pane.');
+      return;
+    }
+    if (activeLanguageMode === 'none') {
+      pushToast(
+        'Not executable directly',
+        'info',
+        `${activeNode.name} (${activeNode.language}) is a non-executable asset.`
+      );
+      return;
+    }
+
+    setBottomPanelVisible(true);
+    setBottomTab('output');
+    const content = draftsRef.current[activeNode.id] ?? loadedContents[activeNode.id];
+
+    try {
+      const res = await runFileMutation.mutateAsync({
+        fileId: activeNode.id,
+        stdin,
+        content,
+      });
+      setLatestExecution(res.execution);
+      pushToast(
+        res.execution.status === 'success'
+          ? `Executed ${activeNode.name}`
+          : `Execution finished (${res.execution.status})`,
+        res.execution.status === 'success' ? 'success' : 'error'
+      );
+    } catch (err) {
+      const msg = err instanceof ApiClientError ? err.userMessage : 'Execution failed.';
+      pushToast('Execution failed', 'error', msg);
+    }
+  }, [
+    activeLanguageMode,
+    activeNode,
+    loadedContents,
+    perms,
+    pushToast,
+    runFileMutation,
+    stdin,
+  ]);
+
   // Global cross-platform workspace keyboard shortcuts
   useEffect(() => {
     const platform = detectPlatform();
@@ -266,10 +341,8 @@ export function WorkspacePage() {
           }
           break;
         case 'run-file':
-          if (perms.canRunCode) {
-            e.preventDefault();
-            pushToast('Run queued', 'info', 'Execution integration arrives in Phase 4.');
-          }
+          e.preventDefault();
+          void handleRunActiveFile();
           break;
       }
     };
@@ -279,10 +352,9 @@ export function WorkspacePage() {
   }, [
     activeFileId,
     explorerFocused,
+    handleRunActiveFile,
     perms.canEditCode,
     perms.canManageFiles,
-    perms.canRunCode,
-    pushToast,
     saveFileNow,
     setCommandPaletteOpen,
   ]);
@@ -339,7 +411,6 @@ export function WorkspacePage() {
     openEditorFiles.find((f) => f.id === activeFileId) ?? null;
 
   const breadcrumb = activeFileId ? getNodeBreadcrumb(treeNodes, activeFileId) : [];
-  const languages = languagesQuery.data?.languages ?? [];
 
   const commitProjectRename = async () => {
     setEditingTitle(false);
@@ -355,13 +426,28 @@ export function WorkspacePage() {
     }
   };
 
-  // Build lightweight Project objects for CommandPalette
+  const runTooltip = !perms.canRunCode
+    ? perms.denialReason('runCode') ?? 'Disabled for Viewer'
+    : !activeEditorFile
+    ? 'Open a file to execute'
+    : activeLanguageMode === 'none'
+    ? 'CSS and plain text files cannot be executed directly'
+    : activeLanguageMode === 'preview'
+    ? 'HTML files render in live preview'
+    : 'Run active file (⌘↵ / Ctrl+Enter)';
+
+  const runDisabled =
+    !perms.canRunCode ||
+    !activeEditorFile ||
+    activeLanguageMode === 'none' ||
+    runFileMutation.isPending;
+
   const paletteProjects: Project[] = [
     ...(dashboardQuery.data?.owned ?? []).map((p) => ({
       id: p.id,
       name: p.name,
-      ownerId: user?.id ?? '',
-      ownerName: user?.name ?? 'You',
+      ownerId: projectQuery.data.owner.id,
+      ownerName: projectQuery.data.owner.name,
       currentUserRole: 'owner' as const,
       updatedAt: p.updatedAt,
       lastOpenedAt: p.updatedAt,
@@ -466,6 +552,7 @@ export function WorkspacePage() {
                 setTitleDraft(projectName);
                 setEditingTitle(true);
               }}
+              title={perms.canRenameProject ? 'Click to rename project' : perms.denialReason('renameProject')}
               className={`group inline-flex items-center gap-1.5 text-[13px] font-semibold text-[var(--text-primary)] truncate max-w-[180px] ${
                 perms.canRenameProject ? 'hover:text-white cursor-pointer' : 'cursor-default'
               }`}
@@ -517,31 +604,43 @@ export function WorkspacePage() {
             <kbd className="font-mono text-[10px]">⌘K</kbd>
           </button>
 
-          <GlassButton
-            variant="primary"
-            size="sm"
-            disabled={!perms.canRunCode || !activeEditorFile}
-            onClick={() =>
-              pushToast('Run queued', 'info', 'Backend execution wires up in Phase 4.')
-            }
-            title={
-              perms.canRunCode ? 'Run active file' : 'Disabled in Read-Only Viewer mode'
-            }
-          >
-            <Play className="w-3.5 h-3.5" strokeWidth={1.75} />
-            <span>Run</span>
-          </GlassButton>
-
-          {perms.canManageCollaborators && (
+          <Tooltip label={runTooltip} side="bottom">
             <GlassButton
-              variant="glass"
+              variant="primary"
               size="sm"
-              onClick={() =>
-                pushToast('Collaborators', 'info', 'Owner sharing modal wires up in Phase 4.')
-              }
+              disabled={runDisabled}
+              loading={runFileMutation.isPending}
+              onClick={() => void handleRunActiveFile()}
             >
+              {runFileMutation.isPending ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={1.75} />
+                  <span>Running…</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  <span>{activeLanguageMode === 'preview' ? 'Preview' : 'Run'}</span>
+                </>
+              )}
+            </GlassButton>
+          </Tooltip>
+
+          {/* Owner-only Share action (hidden for non-owners per delivery plan) */}
+          {perms.canShareProject ? (
+            <GlassButton variant="glass" size="sm" onClick={() => setShareOpen(true)}>
               <Share2 className="w-3.5 h-3.5 text-[var(--text-secondary)]" strokeWidth={1.5} />
               <span>Share</span>
+            </GlassButton>
+          ) : (
+            <GlassButton
+              variant="ghost"
+              size="sm"
+              onClick={() => setLeaveConfirmOpen(true)}
+              className="text-[var(--text-secondary)] hover:text-[#fca5a5]"
+            >
+              <LogOut className="w-3.5 h-3.5" strokeWidth={1.5} />
+              <span className="hidden sm:inline">Leave</span>
             </GlassButton>
           )}
         </div>
@@ -675,21 +774,75 @@ export function WorkspacePage() {
           />
 
           {bottomPanelVisible && (
-            <BottomPanel
+            <ExecutionPanel
               projectId={projectId}
-              projectName={projectName}
               nodes={treeNodes}
-              userName={user?.name ?? getInitials(projectName)}
-              canRunCode={perms.canRunCode}
+              activeFile={
+                activeEditorFile
+                  ? {
+                      id: activeEditorFile.id,
+                      name: activeEditorFile.name,
+                      language: activeEditorFile.language,
+                    }
+                  : null
+              }
+              permissions={perms}
               activeTab={bottomTab}
               onTabChange={setBottomTab}
-              latestExecution={null}
-              executions={[]}
-              onTerminalExecution={() => {}}
+              latestExecution={latestExecution}
+              isRunning={runFileMutation.isPending}
+              stdin={stdin}
+              onStdinChange={setStdin}
+              onOpenFile={openFile}
             />
           )}
         </div>
       </div>
+
+      {/* Owner-only Collaborators / Sharing Dialog */}
+      {perms.canShareProject && (
+        <CollaboratorsDialog
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          projectId={projectId}
+          projectName={projectName}
+          canManageCollaborators={perms.canManageCollaborators}
+        />
+      )}
+
+      {/* Non-owner Leave Project Confirmation */}
+      <Dialog
+        open={leaveConfirmOpen}
+        onClose={() => setLeaveConfirmOpen(false)}
+        title={`Leave “${projectName}”?`}
+        description="You will lose access to this shared workspace until the owner invites you again."
+        maxWidthClass="max-w-[400px]"
+      >
+        <div className="flex items-center justify-end gap-2 pt-3">
+          <GlassButton variant="ghost" autoFocus onClick={() => setLeaveConfirmOpen(false)}>
+            Cancel
+          </GlassButton>
+          <GlassButton
+            variant="danger"
+            loading={leaveProjectMutation.isPending}
+            onClick={() => {
+              void leaveProjectMutation
+                .mutateAsync(projectId)
+                .then(() => {
+                  pushToast(`Left "${projectName}"`, 'info');
+                  navigate('/dashboard', { replace: true });
+                })
+                .catch((err) => {
+                  const msg =
+                    err instanceof ApiClientError ? err.userMessage : 'Could not leave project.';
+                  pushToast('Leave failed', 'error', msg);
+                });
+            }}
+          >
+            Leave Project
+          </GlassButton>
+        </div>
+      </Dialog>
 
       <CommandPalette
         open={commandPaletteOpen}
@@ -700,8 +853,10 @@ export function WorkspacePage() {
         canRunCode={perms.canRunCode}
         onOpenProject={(targetProjectId) => navigate(`/project/${targetProjectId}`)}
         onSelectFile={openFile}
+        onRunCode={() => void handleRunActiveFile()}
         onNewFile={() => setCreateFileTrigger((n) => n + 1)}
         onNewFolder={() => setCreateFolderTrigger((n) => n + 1)}
+        onOpenShare={perms.canShareProject ? () => setShareOpen(true) : undefined}
         onBackToDashboard={() => navigate('/dashboard')}
       />
     </div>
