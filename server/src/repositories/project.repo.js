@@ -127,6 +127,56 @@ export async function getDashboardProjects(userId, search) {
 }
 
 /**
+ * Fetches project metadata and owner for project view (Blueprint Section 7.4 - Endpoint #13)
+ */
+export async function getProjectDetails(projectId) {
+  return prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      name: true,
+      owner: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      _count: {
+        select: {
+          members: true,
+        },
+      },
+    },
+  });
+}
+
+/**
+ * Renames project and updates name_lower (Blueprint Section 7.4 - Endpoint #14)
+ */
+export async function renameProject(projectId, name) {
+  return prisma.project.update({
+    where: { id: projectId },
+    data: {
+      name,
+      nameLower: name.toLowerCase(),
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+}
+
+/**
+ * Deletes project with CASCADE to all child relations (Blueprint Section 5.7 & 7.4 - Endpoint #15)
+ */
+export async function deleteProject(projectId) {
+  return prisma.project.delete({
+    where: { id: projectId },
+  });
+}
+
+/**
  * getRole(projectId, userId)
  * Resolves role: 'owner' | 'editor' | 'viewer' | null
  * (Blueprint Section 5.7 & Page 14)

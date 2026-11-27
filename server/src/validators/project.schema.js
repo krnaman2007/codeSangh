@@ -27,3 +27,28 @@ export const getProjectsSchema = z.object({
     })
     .optional(),
 });
+
+// GET /api/v1/projects/:projectId (Endpoint #13) and DELETE /api/v1/projects/:projectId (Endpoint #15)
+export const projectIdParamSchema = z.object({
+  params: z.object({
+    projectId: z
+      .string({ required_error: 'projectId is required' })
+      .uuid({ message: 'Invalid projectId format (UUID required)' }),
+  }),
+});
+
+// PATCH /api/v1/projects/:projectId (Endpoint #14)
+export const renameProjectSchema = z.object({
+  params: z.object({
+    projectId: z
+      .string({ required_error: 'projectId is required' })
+      .uuid({ message: 'Invalid projectId format (UUID required)' }),
+  }),
+  body: z.object({
+    name: z
+      .string({ required_error: 'Project name is required' })
+      .trim()
+      .min(LIMITS.NAME_MIN_LENGTH, { message: 'Project name cannot be empty' })
+      .max(LIMITS.NAME_MAX_LENGTH, { message: `Project name cannot exceed ${LIMITS.NAME_MAX_LENGTH} characters` }),
+  }),
+});
