@@ -39,6 +39,9 @@ import {
 import {
   getRepoInfo,
   initRepo,
+  setRemote,
+  cloneRepo,
+  getStatus,
 } from '../controllers/git.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
@@ -81,6 +84,8 @@ import {
 import {
   gitRepoParamSchema,
   initGitSchema,
+  setRemoteSchema,
+  cloneGitSchema,
 } from '../validators/git.schema.js';
 
 const router = Router();
@@ -260,6 +265,33 @@ router.post(
   validate(initGitSchema),
   requireRole('editor'),
   initRepo
+);
+
+// Endpoint #40: PUT /api/v1/projects/:projectId/git/remote (Owner)
+router.put(
+  '/:projectId/git/remote',
+  authenticate,
+  validate(setRemoteSchema),
+  requireRole('owner'),
+  setRemote
+);
+
+// Endpoint #41: POST /api/v1/projects/:projectId/git/clone (Owner)
+router.post(
+  '/:projectId/git/clone',
+  authenticate,
+  validate(cloneGitSchema),
+  requireRole('owner'),
+  cloneRepo
+);
+
+// Endpoint #42: GET /api/v1/projects/:projectId/git/status (Viewer+)
+router.get(
+  '/:projectId/git/status',
+  authenticate,
+  validate(gitRepoParamSchema),
+  requireRole('viewer'),
+  getStatus
 );
 
 export default router;
