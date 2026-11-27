@@ -319,3 +319,41 @@ export async function deleteNodeWithDescendants(nodeId, projectId) {
 
   return deletedIds;
 }
+
+/**
+ * Gets breakpoints of a file (Endpoint #36)
+ */
+export async function getFileBreakpoints(fileId, projectId) {
+  const file = await prisma.fileNode.findFirst({
+    where: {
+      id: fileId,
+      projectId,
+      type: 'file',
+    },
+    select: {
+      id: true,
+      language: true,
+      breakpoints: true,
+    },
+  });
+
+  if (!file) return null;
+  return file.breakpoints || [];
+}
+
+/**
+ * Replaces breakpoints of a file (Endpoint #37)
+ */
+export async function updateFileBreakpoints(fileId, projectId, breakpoints) {
+  return prisma.fileNode.update({
+    where: { id: fileId },
+    data: {
+      breakpoints,
+    },
+    select: {
+      id: true,
+      breakpoints: true,
+    },
+  });
+}
+

@@ -29,6 +29,13 @@ import {
   getExecution,
   clearExecutions,
 } from '../controllers/execution.controller.js';
+import {
+  startDebugSession,
+  getActiveSession,
+  stopSession,
+  getBreakpoints,
+  replaceBreakpoints,
+} from '../controllers/debug.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
 import { requireRole } from '../middleware/projectAccess.js';
@@ -60,6 +67,13 @@ import {
   listExecutionsSchema,
   executionParamsSchema,
 } from '../validators/execution.schema.js';
+import {
+  startDebugSchema,
+  activeDebugSchema,
+  stopDebugSchema,
+  fileBreakpointsParamsSchema,
+  replaceBreakpointsSchema,
+} from '../validators/debug.schema.js';
 
 const router = Router();
 
@@ -175,6 +189,51 @@ router.delete(
   validate(collaboratorProjectParamSchema),
   requireRole('owner'),
   clearExecutions
+);
+
+// Endpoint #33: POST /api/v1/projects/:projectId/files/:fileId/debug (Editor+)
+router.post(
+  '/:projectId/files/:fileId/debug',
+  authenticate,
+  validate(startDebugSchema),
+  requireRole('editor'),
+  startDebugSession
+);
+
+// Endpoint #34: GET /api/v1/projects/:projectId/debug/sessions/active (Viewer+)
+router.get(
+  '/:projectId/debug/sessions/active',
+  authenticate,
+  validate(activeDebugSchema),
+  requireRole('viewer'),
+  getActiveSession
+);
+
+// Endpoint #35: DELETE /api/v1/projects/:projectId/debug/sessions/:sessionId (Editor+)
+router.delete(
+  '/:projectId/debug/sessions/:sessionId',
+  authenticate,
+  validate(stopDebugSchema),
+  requireRole('editor'),
+  stopSession
+);
+
+// Endpoint #36: GET /api/v1/projects/:projectId/files/:fileId/breakpoints (Viewer+)
+router.get(
+  '/:projectId/files/:fileId/breakpoints',
+  authenticate,
+  validate(fileBreakpointsParamsSchema),
+  requireRole('viewer'),
+  getBreakpoints
+);
+
+// Endpoint #37: PUT /api/v1/projects/:projectId/files/:fileId/breakpoints (Editor+)
+router.put(
+  '/:projectId/files/:fileId/breakpoints',
+  authenticate,
+  validate(replaceBreakpointsSchema),
+  requireRole('editor'),
+  replaceBreakpoints
 );
 
 export default router;
