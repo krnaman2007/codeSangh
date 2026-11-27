@@ -17,6 +17,12 @@ import {
   changeFileLanguage,
   deleteNode,
 } from '../controllers/node.controller.js';
+import {
+  getCollaborators,
+  inviteCollaborator,
+  updateCollaborator,
+  removeCollaborator,
+} from '../controllers/collaborator.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
 import { requireRole } from '../middleware/projectAccess.js';
@@ -37,6 +43,12 @@ import {
   changeLanguageSchema,
   nodeIdParamSchema,
 } from '../validators/node.schema.js';
+import {
+  collaboratorProjectParamSchema,
+  inviteCollaboratorSchema,
+  updateCollaboratorRoleSchema,
+  collaboratorMemberParamsSchema,
+} from '../validators/collaborator.schema.js';
 
 const router = Router();
 
@@ -81,5 +93,41 @@ router.patch('/:projectId/files/:fileId/language', authenticate, validate(change
 
 // Endpoint #24: DELETE /api/v1/projects/:projectId/nodes/:nodeId (Editor+)
 router.delete('/:projectId/nodes/:nodeId', authenticate, validate(nodeIdParamSchema), requireRole('editor'), deleteNode);
+
+// Endpoint #25: GET /api/v1/projects/:projectId/collaborators (Viewer+)
+router.get(
+  '/:projectId/collaborators',
+  authenticate,
+  validate(collaboratorProjectParamSchema),
+  requireRole('viewer'),
+  getCollaborators
+);
+
+// Endpoint #26: POST /api/v1/projects/:projectId/collaborators (Owner)
+router.post(
+  '/:projectId/collaborators',
+  authenticate,
+  validate(inviteCollaboratorSchema),
+  requireRole('owner'),
+  inviteCollaborator
+);
+
+// Endpoint #27: PATCH /api/v1/projects/:projectId/collaborators/:userId (Owner)
+router.patch(
+  '/:projectId/collaborators/:userId',
+  authenticate,
+  validate(updateCollaboratorRoleSchema),
+  requireRole('owner'),
+  updateCollaborator
+);
+
+// Endpoint #28: DELETE /api/v1/projects/:projectId/collaborators/:userId (Owner / self)
+router.delete(
+  '/:projectId/collaborators/:userId',
+  authenticate,
+  validate(collaboratorMemberParamsSchema),
+  requireRole('viewer'),
+  removeCollaborator
+);
 
 export default router;
