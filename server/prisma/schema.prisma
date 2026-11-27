@@ -11,19 +11,27 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum MemberRole {
+  editor
+  viewer
+}
+
 // 5.1 users (Blueprint Section 5.1)
 model User {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name         String    @db.VarChar(50)
-  email        String    @unique @db.VarChar(254) // lowercase in zod: .toLowerCase()
-  passwordHash String    @map("password_hash")
-  avatarColor  String    @map("avatar_color") @db.VarChar(7)
-  preferences  Json      @default("{\"aiSuggestions\":true,\"suggestionDelayMs\":400}")
-  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String          @db.VarChar(50)
+  email         String          @unique @db.VarChar(254) // lowercase in zod: .toLowerCase()
+  passwordHash  String          @map("password_hash")
+  avatarColor   String          @map("avatar_color") @db.VarChar(7)
+  preferences   Json            @default("{\"aiSuggestions\":true,\"suggestionDelayMs\":400}")
+  lastLoginAt   DateTime?       @map("last_login_at") @db.Timestamptz
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 
-  sessions     Session[]
+  sessions      Session[]
+  ownedProjects Project[]       @relation("ProjectOwner")
+  memberships   ProjectMember[] @relation("MemberUser")
+  invitesSent   ProjectMember[] @relation("MemberInviter")
 
   @@map("users")
 }
@@ -40,9 +48,45 @@ model Session {
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
   @@map("sessions")
+}
+
+// 5.3 projects (Blueprint Section 5.3)
+model Project {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String          @db.VarChar(100)
+  nameLower String          @map("name_lower") @db.VarChar(100) // set in repository: name.toLowerCase()
+  ownerId   String          @map("owner_id") @db.Uuid
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  owner     User            @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members   ProjectMember[]
+
+  @@unique([ownerId, nameLower])
+  @@index([ownerId])
+  @@map("projects")
+}
+
+// 5.4 project_members (Blueprint Section 5.4)
+model ProjectMember {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId   String     @map("project_id") @db.Uuid
+  userId      String     @map("user_id") @db.Uuid
+  role        MemberRole
+  invitedById String     @map("invited_by") @db.Uuid
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        User       @relation("MemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy   User       @relation("MemberInviter", fields: [invitedById], references: [id])
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@map("project_members")
 }
