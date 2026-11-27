@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import healthRoutes from './health.routes.js';
+import languageRoutes from './language.routes.js';
 import authRoutes from './auth.routes.js';
 import userRoutes from './user.routes.js';
-import languageRoutes from './language.routes.js';
+import projectRoutes from './project.routes.js';
 
 const router = Router();
 
@@ -17,5 +18,8 @@ router.use('/auth', authRoutes);
 
 // Mount user routes (/api/v1/users/*)
 router.use('/users', userRoutes);
+
+// Mount project routes (/api/v1/projects/*)
+router.use('/projects', projectRoutes);
 
 export default router;
