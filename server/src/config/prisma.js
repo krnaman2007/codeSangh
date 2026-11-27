@@ -1,10 +1,10 @@
-const prisma = require('../db/prisma');
+import prisma from '../db/prisma.js';
 
 /**
  * Connects to the database and verifies connectivity.
  * Retries once on connection errors (P1001 / P1017) to account for Neon serverless compute cold starts.
  */
-async function connectDB(retries = 1) {
+export async function connectDB(retries = 1) {
   try {
     await prisma.$connect();
     console.log('Successfully connected to Neon PostgreSQL database via Prisma.');
@@ -22,12 +22,8 @@ async function connectDB(retries = 1) {
 /**
  * Graceful disconnect from Prisma
  */
-async function disconnectDB() {
+export async function disconnectDB() {
   await prisma.$disconnect();
 }
 
-module.exports = {
-  prisma,
-  connectDB,
-  disconnectDB,
-};
+export { prisma };

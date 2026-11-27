@@ -1,7 +1,7 @@
-const http = require('http');
-const app = require('./app');
-const env = require('./config/env');
-const { connectDB, disconnectDB } = require('./config/prisma');
+import http from 'http';
+import app from './app.js';
+import env from './config/env.js';
+import { connectDB, disconnectDB } from './config/prisma.js';
 
 const PORT = env.PORT || 5000;
 

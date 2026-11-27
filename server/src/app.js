@@ -1,9 +1,10 @@
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const cookieParser = require('cookie-parser');
-const morgan = require('morgan');
-const env = require('./config/env');
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import morgan from 'morgan';
+import env from './config/env.js';
+import apiRoutes from './routes/index.js';
 
 const app = express();
 
@@ -13,7 +14,7 @@ app.use(helmet());
 // CORS configuration (Blueprint: CLIENT_ORIGIN, credentials: true)
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+    origin: env.CLIENT_ORIGIN,
     credentials: true,
   })
 );
@@ -30,16 +31,11 @@ if (env.NODE_ENV !== 'test') {
   app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 }
 
-// Health check endpoint (Blueprint section 7.3)
-app.get(['/health', '/api/v1/health'], (req, res) => {
-  res.status(200).json({
-    success: true,
-    data: {
-      status: 'ok',
-      time: new Date().toISOString(),
-    },
-  });
-});
+// Mount REST API routes under /api/v1
+app.use('/api/v1', apiRoutes);
+
+// Root liveness check shortcut (/health -> delegates to /api/v1/health)
+app.use('/', apiRoutes);
 
 // 404 handler for unhandled routes
 app.use((req, res) => {
@@ -67,4 +63,4 @@ app.use((err, req, res, next) => {
   });
 });
 
-module.exports = app;
+export default app;
