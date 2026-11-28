@@ -11,6 +11,9 @@ import {
   unstageGitPaths,
   discardGitChanges,
   commitStagedChanges,
+  getGitLog,
+  getGitDiff,
+  getGitBranches,
 } from '../services/git.service.js';
 import { findNodeById } from '../repositories/node.repo.js';
 import { computeNodePath } from '../utils/treeUtils.js';
@@ -237,4 +240,55 @@ export const commit = asyncHandler(async (req, res) => {
   });
 
   return sendSuccess(res, result, 201);
+});
+
+/**
+ * GET /api/v1/projects/:projectId/git/log (Endpoint #47)
+ * Get commit history for a branch.
+ * Access: Viewer+ (Blueprint & PDF Page 6)
+ */
+export const getLog = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { branch, page, limit } = req.query;
+
+  const result = await getGitLog({
+    projectId,
+    branch,
+    page,
+    limit,
+  });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * GET /api/v1/projects/:projectId/git/diff (Endpoint #48)
+ * Get file diff between working copy/index and HEAD, or commit vs parent.
+ * Access: Viewer+ (Blueprint & PDF Page 6)
+ */
+export const getDiff = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { path: rawPath, staged, commit: commitSha } = req.query;
+
+  const result = await getGitDiff({
+    projectId,
+    path: rawPath,
+    staged,
+    commit: commitSha,
+  });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * GET /api/v1/projects/:projectId/git/branches (Endpoint #49)
+ * List all local and remote branches.
+ * Access: Viewer+ (Blueprint & PDF Page 6)
+ */
+export const getBranches = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+
+  const result = await getGitBranches(projectId);
+
+  return sendSuccess(res, result, 200);
 });

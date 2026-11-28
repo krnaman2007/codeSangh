@@ -46,6 +46,9 @@ import {
   unstage,
   discard,
   commit,
+  getLog,
+  getDiff,
+  getBranches,
 } from '../controllers/git.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
@@ -94,6 +97,9 @@ import {
   unstagePathsSchema,
   discardPathsSchema,
   commitGitSchema,
+  gitLogSchema,
+  gitDiffSchema,
+  gitBranchesSchema,
 } from '../validators/git.schema.js';
 
 const router = Router();
@@ -336,6 +342,33 @@ router.post(
   validate(commitGitSchema),
   requireRole('editor'),
   commit
+);
+
+// Endpoint #47: GET /api/v1/projects/:projectId/git/log (Viewer+)
+router.get(
+  '/:projectId/git/log',
+  authenticate,
+  validate(gitLogSchema),
+  requireRole('viewer'),
+  getLog
+);
+
+// Endpoint #48: GET /api/v1/projects/:projectId/git/diff (Viewer+)
+router.get(
+  '/:projectId/git/diff',
+  authenticate,
+  validate(gitDiffSchema),
+  requireRole('viewer'),
+  getDiff
+);
+
+// Endpoint #49: GET /api/v1/projects/:projectId/git/branches (Viewer+)
+router.get(
+  '/:projectId/git/branches',
+  authenticate,
+  validate(gitBranchesSchema),
+  requireRole('viewer'),
+  getBranches
 );
 
 export default router;

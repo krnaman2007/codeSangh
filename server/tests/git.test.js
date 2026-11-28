@@ -11,6 +11,9 @@ import {
   unstagePathsSchema,
   discardPathsSchema,
   commitGitSchema,
+  gitLogSchema,
+  gitDiffSchema,
+  gitBranchesSchema,
 } from '../src/validators/git.schema.js';
 import {
   initGitRepository,
@@ -23,7 +26,11 @@ import {
   discardGitChanges,
   commitStagedChanges,
   withGitLock,
+  getGitLog,
+  getGitDiff,
+  getGitBranches,
 } from '../src/services/git.service.js';
+import git from 'isomorphic-git';
 
 test('Git Version Control Module (Endpoints 38-42 - Mastermind M2)', async (t) => {
   const validProjectId = '3f2a9c1e-6140-4c12-8809-5b76612c2a01';
@@ -367,6 +374,181 @@ test('Git Version Control Module (Endpoints 38-42 - Mastermind M2)', async (t) =
         return true;
       }
     );
+
+    // Cleanup
+    if (fs.existsSync(testDir)) {
+      await fs.promises.rm(testDir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('Endpoints #47-#49: gitLogSchema, gitDiffSchema & gitBranchesSchema (Viewer+)', async () => {
+    // 1. gitLogSchema
+    const validLog = gitLogSchema.safeParse({
+      params: { projectId: validProjectId },
+      query: { branch: 'main', page: '1', limit: '10' },
+    });
+    assert.equal(validLog.success, true);
+    assert.equal(validLog.data.query.page, 1);
+    assert.equal(validLog.data.query.limit, 10);
+
+    const defaultLog = gitLogSchema.safeParse({
+      params: { projectId: validProjectId },
+      query: {},
+    });
+    assert.equal(defaultLog.success, true);
+    assert.equal(defaultLog.data.query.page, 1);
+    assert.equal(defaultLog.data.query.limit, 20);
+
+    const invalidLimitLog = gitLogSchema.safeParse({
+      params: { projectId: validProjectId },
+      query: { limit: '200' },
+    });
+    assert.equal(invalidLimitLog.success, false);
+
+    // 2. gitDiffSchema
+    const validDiff = gitDiffSchema.safeParse({
+      params: { projectId: validProjectId },
+      query: {
+        path: 'src/app.js',
+        staged: 'true',
+        commit: '3f2a9c1e61404c1288095b76612c2a013f2a9c1e',
+      },
+    });
+    assert.equal(validDiff.success, true);
+    assert.equal(validDiff.data.query.staged, true);
+
+    const invalidPathDiff = gitDiffSchema.safeParse({
+      params: { projectId: validProjectId },
+      query: { path: '../secrets.env' },
+    });
+    assert.equal(invalidPathDiff.success, false);
+
+    const missingPathDiff = gitDiffSchema.safeParse({
+      params: { projectId: validProjectId },
+      query: {},
+    });
+    assert.equal(missingPathDiff.success, false);
+
+    // 3. gitBranchesSchema
+    const validBranches = gitBranchesSchema.safeParse({
+      params: { projectId: validProjectId },
+    });
+    assert.equal(validBranches.success, true);
+
+    const invalidBranches = gitBranchesSchema.safeParse({
+      params: { projectId: 'not-a-valid-uuid' },
+    });
+    assert.equal(invalidBranches.success, false);
+  });
+
+  await t.test('Real Git Log, Diff, and Branches Operations (Endpoints 47-49)', async () => {
+    const testDir = getProjectGitDir(testProjectId);
+
+    if (fs.existsSync(testDir)) {
+      await fs.promises.rm(testDir, { recursive: true, force: true });
+    }
+
+    // 1. Initialize repo
+    await initGitRepository({
+      projectId: testProjectId,
+      defaultBranch: 'main',
+      user: { id: 'u1', name: 'Naman K', email: 'naman@devsync.io' },
+      files: [
+        { path: 'index.js', content: 'console.log("Initial code v1.0");\n' },
+      ],
+    });
+
+    // 2. Endpoint #47: git log initial state
+    const log1 = await getGitLog({
+      projectId: testProjectId,
+      branch: 'main',
+      page: 1,
+      limit: 10,
+    });
+    assert.equal(log1.total, 1);
+    assert.equal(log1.items.length, 1);
+    assert.equal(log1.items[0].message, 'Initial commit');
+    assert.equal(log1.items[0].author.name, 'Naman K');
+    assert.equal(log1.items[0].sha.length, 40);
+
+    // 3. Make second commit and check pagination
+    await fs.promises.writeFile(path.join(testDir, 'index.js'), 'console.log("Updated code v2.0");\n');
+    await stageGitPaths({ projectId: testProjectId, paths: ['index.js'] });
+    const commit2 = await commitStagedChanges({
+      projectId: testProjectId,
+      message: 'feat: update to v2.0',
+      user: { id: 'u1', name: 'Naman K', email: 'naman@devsync.io' },
+    });
+
+    const log2 = await getGitLog({
+      projectId: testProjectId,
+      page: 1,
+      limit: 1,
+    });
+    assert.equal(log2.total, 2);
+    assert.equal(log2.items.length, 1);
+    assert.equal(log2.items[0].sha, commit2.commit.sha);
+    assert.equal(log2.items[0].message, 'feat: update to v2.0');
+
+    // 4. Endpoint #48: git diff - working tree vs HEAD
+    await fs.promises.writeFile(path.join(testDir, 'index.js'), 'console.log("Working copy v3.0");\n');
+    const workingDiff = await getGitDiff({
+      projectId: testProjectId,
+      path: 'index.js',
+    });
+    assert.equal(workingDiff.path, 'index.js');
+    assert.equal(workingDiff.language, 'javascript');
+    assert.ok(workingDiff.original.includes('Updated code v2.0'));
+    assert.ok(workingDiff.modified.includes('Working copy v3.0'));
+
+    // 5. Endpoint #48: git diff - commit vs parent commit
+    const commitDiff = await getGitDiff({
+      projectId: testProjectId,
+      path: 'index.js',
+      commit: commit2.commit.sha,
+    });
+    assert.ok(commitDiff.original.includes('Initial code v1.0'));
+    assert.ok(commitDiff.modified.includes('Updated code v2.0'));
+
+    // Non-existent file diff throws 404
+    await assert.rejects(
+      async () => {
+        await getGitDiff({
+          projectId: testProjectId,
+          path: 'non-existent.js',
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'NOT_FOUND');
+        assert.equal(err.statusCode, 404);
+        return true;
+      }
+    );
+
+    // 6. Endpoint #49: git branches
+    const initialBranches = await getGitBranches(testProjectId);
+    assert.equal(initialBranches.current, 'main');
+    assert.equal(initialBranches.branches.length, 1);
+    assert.equal(initialBranches.branches[0].name, 'main');
+    assert.equal(initialBranches.branches[0].current, true);
+    assert.equal(initialBranches.branches[0].sha.length, 40);
+
+    // Create a new branch via isomorphic-git
+    await git.branch({ fs, dir: testDir, ref: 'feature/auth' });
+    const multipleBranches = await getGitBranches(testProjectId);
+    assert.equal(multipleBranches.current, 'main');
+    assert.equal(multipleBranches.branches.length, 2);
+    const authBranch = multipleBranches.branches.find((b) => b.name === 'feature/auth');
+    assert.ok(authBranch);
+    assert.equal(authBranch.current, false);
+    assert.equal(authBranch.sha.length, 40);
+
+    // 7. Role permissions matrix for Endpoints 47-49: Viewer+
+    const RANK = { viewer: 1, editor: 2, owner: 3 };
+    const canReadGitInfo = (role) => RANK[role] >= RANK.viewer;
+    assert.equal(canReadGitInfo('owner'), true);
+    assert.equal(canReadGitInfo('editor'), true);
+    assert.equal(canReadGitInfo('viewer'), true);
 
     // Cleanup
     if (fs.existsSync(testDir)) {

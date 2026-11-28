@@ -118,3 +118,42 @@ export const commitGitSchema = z.object({
       .max(500, 'Commit message cannot exceed 500 characters'),
   }),
 });
+
+export const gitLogSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  query: z.object({
+    branch: z.string().trim().min(1).max(100).optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+  }),
+});
+
+export const gitDiffSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  query: z.object({
+    path: z
+      .string()
+      .trim()
+      .min(1, 'Path is required')
+      .regex(/^(?!\.\.)(?!.*\/\.\.)/, 'Path traversal with .. is forbidden'),
+    staged: z
+      .union([z.boolean(), z.enum(['true', 'false'])])
+      .optional()
+      .transform((v) => v === true || v === 'true'),
+    commit: z
+      .string()
+      .trim()
+      .regex(/^[0-9a-f]{40}$/i, 'Commit must be a 40-character SHA hash')
+      .optional(),
+  }),
+});
+
+export const gitBranchesSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+});

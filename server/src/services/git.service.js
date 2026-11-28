@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/node';
 import ApiError from '../utils/ApiError.js';
+import { getLanguageByExt } from '../constants/languages.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -527,4 +528,243 @@ export async function commitStagedChanges({ projectId, message, user }) {
       throw new ApiError(500, 'GIT_COMMIT_FAILED', `Failed to commit staged changes: ${err.message}`);
     }
   });
+}
+
+/**
+ * Gets paginated commit history for a branch (Endpoint #47 - Mastermind M2)
+ */
+export async function getGitLog({ projectId, branch, page = 1, limit = 20 }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  try {
+    const currentBranch = branch || (await git.currentBranch({ fs, dir })) || 'main';
+    let rawCommits = [];
+
+    try {
+      rawCommits = await git.log({
+        fs,
+        dir,
+        ref: currentBranch,
+        depth: 500,
+      });
+    } catch (err) {
+      // Empty repo with no commits yet returns empty items
+      if (err.name === 'NotFoundError' || err.code === 'NotFoundError') {
+        return {
+          items: [],
+          page: Number(page),
+          limit: Number(limit),
+          total: 0,
+        };
+      }
+      throw err;
+    }
+
+    const allCommits = rawCommits.map((c) => ({
+      sha: c.oid,
+      message: c.commit.message.trim(),
+      author: {
+        name: c.commit.author.name,
+        email: c.commit.author.email,
+      },
+      committedAt: new Date(c.commit.author.timestamp * 1000).toISOString(),
+      parents: c.commit.parent || [],
+    }));
+
+    const pageNum = Number(page) || 1;
+    const limitNum = Number(limit) || 20;
+    const startIndex = (pageNum - 1) * limitNum;
+    const paginatedCommits = allCommits.slice(startIndex, startIndex + limitNum);
+
+    return {
+      items: paginatedCommits,
+      page: pageNum,
+      limit: limitNum,
+      total: allCommits.length,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(500, 'GIT_LOG_FAILED', `Failed to retrieve git log: ${err.message}`);
+  }
+}
+
+/**
+ * Gets file diff between working copy/index and HEAD, or commit vs parent (Endpoint #48 - Mastermind M2)
+ */
+export async function getGitDiff({ projectId, path: rawPath, staged, commit }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  const cleanPath = rawPath.replace(/^\/+/, '');
+  const targetPath = path.join(dir, cleanPath);
+  const ext = path.extname(cleanPath);
+  const langConfig = getLanguageByExt(ext);
+  const language = langConfig ? langConfig.key : 'text';
+
+  let original = '';
+  let modified = '';
+
+  try {
+    if (commit) {
+      // 1. Commit vs Parent Commit diff
+      let commitObj;
+      try {
+        commitObj = await git.readCommit({ fs, dir, oid: commit });
+      } catch (err) {
+        throw new ApiError(404, 'NOT_FOUND', `Commit '${commit}' not found`);
+      }
+
+      // Read modified blob at commit
+      try {
+        const { blob } = await git.readBlob({ fs, dir, oid: commit, filepath: cleanPath });
+        modified = Buffer.from(blob).toString('utf8');
+      } catch {
+        modified = '';
+      }
+
+      // Read original blob at parent commit (if any)
+      const parentSha = commitObj.commit.parent && commitObj.commit.parent[0];
+      if (parentSha) {
+        try {
+          const { blob } = await git.readBlob({ fs, dir, oid: parentSha, filepath: cleanPath });
+          original = Buffer.from(blob).toString('utf8');
+        } catch {
+          original = '';
+        }
+      }
+
+      if (!modified && !original) {
+        throw new ApiError(404, 'NOT_FOUND', `File '${cleanPath}' not found in commit ${commit} or its parent`);
+      }
+    } else {
+      // 2. Working copy or Staged diff vs HEAD
+      let headSha = null;
+      try {
+        headSha = await git.resolveRef({ fs, dir, ref: 'HEAD' });
+      } catch {
+        // No HEAD commits yet
+      }
+
+      if (headSha) {
+        try {
+          const { blob } = await git.readBlob({ fs, dir, oid: headSha, filepath: cleanPath });
+          original = Buffer.from(blob).toString('utf8');
+        } catch {
+          original = '';
+        }
+      }
+
+      // Modified side: working tree file on disk
+      if (fs.existsSync(targetPath)) {
+        try {
+          modified = await fs.promises.readFile(targetPath, 'utf8');
+        } catch {
+          modified = '';
+        }
+      } else {
+        modified = '';
+      }
+
+      if (!original && !modified) {
+        throw new ApiError(404, 'NOT_FOUND', `File '${cleanPath}' not found in HEAD or working directory`);
+      }
+    }
+
+    return {
+      path: cleanPath,
+      language,
+      original,
+      modified,
+      diff: {
+        path: cleanPath,
+        language,
+        original,
+        modified,
+      },
+    };
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(500, 'GIT_DIFF_FAILED', `Failed to generate git diff: ${err.message}`);
+  }
+}
+
+/**
+ * Lists all local and remote branches (Endpoint #49 - Mastermind M2)
+ */
+export async function getGitBranches(projectId) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  try {
+    const current = (await git.currentBranch({ fs, dir })) || 'main';
+    const localBranchNames = await git.listBranches({ fs, dir });
+
+    if (localBranchNames.length === 0) {
+      return {
+        current,
+        branches: [
+          {
+            name: current,
+            sha: null,
+            current: true,
+          },
+        ],
+      };
+    }
+
+    const branches = [];
+    for (const name of localBranchNames) {
+      let sha = null;
+      try {
+        sha = await git.resolveRef({ fs, dir, ref: name });
+      } catch {
+        // Branch without commits yet
+      }
+
+      branches.push({
+        name,
+        sha,
+        current: name === current,
+      });
+    }
+
+    // Include remote branches if available
+    try {
+      const remoteBranchNames = await git.listBranches({ fs, dir, remote: 'origin' });
+      for (const rName of remoteBranchNames) {
+        const fullRemoteName = `origin/${rName}`;
+        let sha = null;
+        try {
+          sha = await git.resolveRef({ fs, dir, ref: `refs/remotes/origin/${rName}` });
+        } catch {
+          // Ignore
+        }
+        branches.push({
+          name: fullRemoteName,
+          sha,
+          current: false,
+        });
+      }
+    } catch {
+      // No remotes configured
+    }
+
+    return {
+      current,
+      branches,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(500, 'GIT_BRANCHES_FAILED', `Failed to list branches: ${err.message}`);
+  }
 }
