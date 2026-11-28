@@ -62,6 +62,10 @@ import {
   getBuildLog,
   resetEnvironment,
 } from '../controllers/environment.controller.js';
+import {
+  getIceServers,
+  getVoiceSessionInfo,
+} from '../controllers/voice.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
 import { requireRole } from '../middleware/projectAccess.js';
@@ -125,6 +129,11 @@ import {
   getBuildLogSchema,
   resetEnvironmentSchema,
 } from '../validators/environment.schema.js';
+import {
+  voiceProjectParamSchema,
+  getIceServersSchema,
+  getVoiceSessionSchema,
+} from '../validators/voice.schema.js';
 
 const router = Router();
 
@@ -483,6 +492,24 @@ router.delete(
   validate(resetEnvironmentSchema),
   requireRole('owner'),
   resetEnvironment
+);
+
+// Endpoint #61: GET /api/v1/projects/:projectId/voice/ice-servers (Viewer+)
+router.get(
+  '/:projectId/voice/ice-servers',
+  authenticate,
+  validate(getIceServersSchema),
+  requireRole('viewer'),
+  getIceServers
+);
+
+// Endpoint #62: GET /api/v1/projects/:projectId/voice (Viewer+)
+router.get(
+  '/:projectId/voice',
+  authenticate,
+  validate(getVoiceSessionSchema),
+  requireRole('viewer'),
+  getVoiceSessionInfo
 );
 
 export default router;

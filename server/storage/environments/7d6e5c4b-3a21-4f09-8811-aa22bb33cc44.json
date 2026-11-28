@@ -27,10 +27,10 @@
   "status": "ready",
   "dockerfile": "FROM node:20-bookworm-slim\nRUN useradd -m -u 1000 dev\nWORKDIR /workspace\nRUN apt-get update && apt-get install -y --no-install-recommends curl=7.88.1 && rm -rf /var/lib/apt/lists/*\nRUN npm install -g express@4.19.2\nENV NODE_ENV=\"production\"\nENV APP_PORT=\"8080\"\nRUN npm install\nUSER dev",
   "buildLog": "[Build started] Generating environment image devsync/proj-7d6e5c4b:b87c5f152edc...\n\n[Build finished] Status: ready. Tagged: devsync/proj-7d6e5c4b:b87c5f152edc\n",
-  "builtAt": "2026-11-28T07:23:27.342Z",
+  "builtAt": "2026-11-28T07:37:47.535Z",
   "updatedBy": {
     "id": "u1",
     "name": "Naman K"
   },
-  "updatedAt": "2026-11-28T07:23:27.320Z"
+  "updatedAt": "2026-11-28T07:37:47.515Z"
 }

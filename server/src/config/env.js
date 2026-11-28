@@ -35,6 +35,13 @@ const env = {
   ENV_IDLE_MINUTES: parseInt(process.env.ENV_IDLE_MINUTES, 10) || 10,
   ENV_BUILD_TIMEOUT_SEC: parseInt(process.env.ENV_BUILD_TIMEOUT_SEC, 10) || 300,
   GIT_DATA_DIR: process.env.GIT_DATA_DIR || 'storage/git',
+
+  // Real-Time Voice WebRTC Configuration (M4 - Blueprint Section 4.1 & Page 8)
+  STUN_URLS: process.env.STUN_URLS || 'stun:stun.l.google.com:19302',
+  TURN_URL: process.env.TURN_URL || 'turn:turn.example.com:3478',
+  TURN_SECRET: process.env.TURN_SECRET || 'devsync-coturn-super-secret-key-change-me',
+  TURN_CREDENTIAL_TTL_SEC: parseInt(process.env.TURN_CREDENTIAL_TTL_SEC, 10) || 3600,
+  VOICE_MAX_PARTICIPANTS: parseInt(process.env.VOICE_MAX_PARTICIPANTS, 10) || 8,
 };
 
 export default env;
