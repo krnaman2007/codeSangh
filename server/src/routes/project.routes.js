@@ -42,7 +42,42 @@ import {
   setRemote,
   cloneRepo,
   getStatus,
+  stage,
+  unstage,
+  discard,
+  commit,
+  getLog,
+  getDiff,
+  getBranches,
+  createBranch,
+  checkoutBranch,
+  deleteBranch,
+  pull,
+  push,
 } from '../controllers/git.controller.js';
+import {
+  getEnvironment,
+  saveEnvironment,
+  rebuildEnvironment,
+  getBuildLog,
+  resetEnvironment,
+} from '../controllers/environment.controller.js';
+import {
+  getIceServers,
+  getVoiceSessionInfo,
+} from '../controllers/voice.controller.js';
+import {
+  chatWithAi,
+  getConversations,
+  getConversation,
+  deleteConversation,
+  completeCode,
+} from '../controllers/ai.controller.js';
+import {
+  updateSettings,
+  getSettings,
+} from '../controllers/settings.controller.js';
+import { aiCompleteRateLimiter } from '../middleware/rateLimiter.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
 import { requireRole } from '../middleware/projectAccess.js';
@@ -86,7 +121,41 @@ import {
   initGitSchema,
   setRemoteSchema,
   cloneGitSchema,
+  stagePathsSchema,
+  unstagePathsSchema,
+  discardPathsSchema,
+  commitGitSchema,
+  gitLogSchema,
+  gitDiffSchema,
+  gitBranchesSchema,
+  createBranchSchema,
+  checkoutBranchSchema,
+  deleteBranchSchema,
+  pullGitSchema,
+  pushGitSchema,
 } from '../validators/git.schema.js';
+import {
+  environmentProjectIdSchema,
+  saveEnvironmentSchema,
+  buildEnvironmentSchema,
+  getBuildLogSchema,
+  resetEnvironmentSchema,
+} from '../validators/environment.schema.js';
+import {
+  voiceProjectParamSchema,
+  getIceServersSchema,
+  getVoiceSessionSchema,
+} from '../validators/voice.schema.js';
+import {
+  aiChatSchema,
+  listAiConversationsSchema,
+  aiConversationIdParamSchema,
+  aiCompleteSchema,
+} from '../validators/ai.schema.js';
+import {
+  updateProjectSettingsSchema,
+  getProjectSettingsSchema,
+} from '../validators/settings.schema.js';
 
 const router = Router();
 
@@ -292,6 +361,241 @@ router.get(
   validate(gitRepoParamSchema),
   requireRole('viewer'),
   getStatus
+);
+
+// Endpoint #43: POST /api/v1/projects/:projectId/git/stage (Editor+)
+router.post(
+  '/:projectId/git/stage',
+  authenticate,
+  validate(stagePathsSchema),
+  requireRole('editor'),
+  stage
+);
+
+// Endpoint #44: POST /api/v1/projects/:projectId/git/unstage (Editor+)
+router.post(
+  '/:projectId/git/unstage',
+  authenticate,
+  validate(unstagePathsSchema),
+  requireRole('editor'),
+  unstage
+);
+
+// Endpoint #45: POST /api/v1/projects/:projectId/git/discard (Editor+)
+router.post(
+  '/:projectId/git/discard',
+  authenticate,
+  validate(discardPathsSchema),
+  requireRole('editor'),
+  discard
+);
+
+// Endpoint #46: POST /api/v1/projects/:projectId/git/commit (Editor+)
+router.post(
+  '/:projectId/git/commit',
+  authenticate,
+  validate(commitGitSchema),
+  requireRole('editor'),
+  commit
+);
+
+// Endpoint #47: GET /api/v1/projects/:projectId/git/log (Viewer+)
+router.get(
+  '/:projectId/git/log',
+  authenticate,
+  validate(gitLogSchema),
+  requireRole('viewer'),
+  getLog
+);
+
+// Endpoint #48: GET /api/v1/projects/:projectId/git/diff (Viewer+)
+router.get(
+  '/:projectId/git/diff',
+  authenticate,
+  validate(gitDiffSchema),
+  requireRole('viewer'),
+  getDiff
+);
+
+// Endpoint #49: GET /api/v1/projects/:projectId/git/branches (Viewer+)
+router.get(
+  '/:projectId/git/branches',
+  authenticate,
+  validate(gitBranchesSchema),
+  requireRole('viewer'),
+  getBranches
+);
+
+// Endpoint #50: POST /api/v1/projects/:projectId/git/branches (Editor+)
+router.post(
+  '/:projectId/git/branches',
+  authenticate,
+  validate(createBranchSchema),
+  requireRole('editor'),
+  createBranch
+);
+
+// Endpoint #51: POST /api/v1/projects/:projectId/git/checkout (Editor+)
+router.post(
+  '/:projectId/git/checkout',
+  authenticate,
+  validate(checkoutBranchSchema),
+  requireRole('editor'),
+  checkoutBranch
+);
+
+// Endpoint #52: DELETE /api/v1/projects/:projectId/git/branches/:name (Editor+)
+router.delete(
+  '/:projectId/git/branches/:name',
+  authenticate,
+  validate(deleteBranchSchema),
+  requireRole('editor'),
+  deleteBranch
+);
+
+// Endpoint #53: POST /api/v1/projects/:projectId/git/pull (Owner)
+router.post(
+  '/:projectId/git/pull',
+  authenticate,
+  validate(pullGitSchema),
+  requireRole('owner'),
+  pull
+);
+
+// Endpoint #54: POST /api/v1/projects/:projectId/git/push (Owner)
+router.post(
+  '/:projectId/git/push',
+  authenticate,
+  validate(pushGitSchema),
+  requireRole('owner'),
+  push
+);
+
+// Endpoint #56: GET /api/v1/projects/:projectId/environment (Viewer+)
+router.get(
+  '/:projectId/environment',
+  authenticate,
+  validate(environmentProjectIdSchema),
+  requireRole('viewer'),
+  getEnvironment
+);
+
+// Endpoint #57: PUT /api/v1/projects/:projectId/environment (Owner)
+router.put(
+  '/:projectId/environment',
+  authenticate,
+  validate(saveEnvironmentSchema),
+  requireRole('owner'),
+  saveEnvironment
+);
+
+// Endpoint #58: POST /api/v1/projects/:projectId/environment/build (Owner)
+router.post(
+  '/:projectId/environment/build',
+  authenticate,
+  validate(buildEnvironmentSchema),
+  requireRole('owner'),
+  rebuildEnvironment
+);
+
+// Endpoint #59: GET /api/v1/projects/:projectId/environment/build-log (Viewer+)
+router.get(
+  '/:projectId/environment/build-log',
+  authenticate,
+  validate(getBuildLogSchema),
+  requireRole('viewer'),
+  getBuildLog
+);
+
+// Endpoint #60: DELETE /api/v1/projects/:projectId/environment (Owner)
+router.delete(
+  '/:projectId/environment',
+  authenticate,
+  validate(resetEnvironmentSchema),
+  requireRole('owner'),
+  resetEnvironment
+);
+
+// Endpoint #61: GET /api/v1/projects/:projectId/voice/ice-servers (Viewer+)
+router.get(
+  '/:projectId/voice/ice-servers',
+  authenticate,
+  validate(getIceServersSchema),
+  requireRole('viewer'),
+  getIceServers
+);
+
+// Endpoint #62: GET /api/v1/projects/:projectId/voice (Viewer+)
+router.get(
+  '/:projectId/voice',
+  authenticate,
+  validate(getVoiceSessionSchema),
+  requireRole('viewer'),
+  getVoiceSessionInfo
+);
+
+// Endpoint #63: POST /api/v1/projects/:projectId/ai/chat (Viewer+)
+router.post(
+  '/:projectId/ai/chat',
+  authenticate,
+  validate(aiChatSchema),
+  requireRole('viewer'),
+  chatWithAi
+);
+
+// Endpoint #64: GET /api/v1/projects/:projectId/ai/conversations (Viewer+)
+router.get(
+  '/:projectId/ai/conversations',
+  authenticate,
+  validate(listAiConversationsSchema),
+  requireRole('viewer'),
+  getConversations
+);
+
+// Endpoint #65: GET /api/v1/projects/:projectId/ai/conversations/:conversationId (Viewer+)
+router.get(
+  '/:projectId/ai/conversations/:conversationId',
+  authenticate,
+  validate(aiConversationIdParamSchema),
+  requireRole('viewer'),
+  getConversation
+);
+
+// Endpoint #66: DELETE /api/v1/projects/:projectId/ai/conversations/:conversationId (Viewer+)
+router.delete(
+  '/:projectId/ai/conversations/:conversationId',
+  authenticate,
+  validate(aiConversationIdParamSchema),
+  requireRole('viewer'),
+  deleteConversation
+);
+
+// Endpoint #67: POST /api/v1/projects/:projectId/ai/complete (Editor+)
+router.post(
+  '/:projectId/ai/complete',
+  authenticate,
+  validate(aiCompleteSchema),
+  requireRole('editor'),
+  aiCompleteRateLimiter,
+  completeCode
+);
+
+// Endpoint #68: PATCH /api/v1/projects/:projectId/settings (Owner)
+router.patch(
+  '/:projectId/settings',
+  authenticate,
+  validate(updateProjectSettingsSchema),
+  requireRole('owner'),
+  updateSettings
+);
+
+// GET /api/v1/projects/:projectId/settings (Viewer+)
+router.get(
+  '/:projectId/settings',
+  authenticate,
+  validate(getProjectSettingsSchema),
+  requireRole('viewer'),
+  getSettings
 );
 
 export default router;

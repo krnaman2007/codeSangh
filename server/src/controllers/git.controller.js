@@ -7,6 +7,18 @@ import {
   setGitRemote,
   cloneGitRepository,
   getGitStatus,
+  stageGitPaths,
+  unstageGitPaths,
+  discardGitChanges,
+  commitStagedChanges,
+  getGitLog,
+  getGitDiff,
+  getGitBranches,
+  createGitBranch,
+  checkoutGitBranch,
+  deleteGitBranch,
+  pullGitRepository,
+  pushGitRepository,
 } from '../services/git.service.js';
 import { findNodeById } from '../repositories/node.repo.js';
 import { computeNodePath } from '../utils/treeUtils.js';
@@ -173,4 +185,203 @@ export const getStatus = asyncHandler(async (req, res) => {
   const status = await getGitStatus(projectId);
 
   return sendSuccess(res, { status }, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/stage (Endpoint #43)
+ * Stage specific paths or all files (".").
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const stage = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { paths } = req.body;
+
+  const result = await stageGitPaths({ projectId, paths });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/unstage (Endpoint #44)
+ * Unstage specific paths or all files (".").
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const unstage = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { paths } = req.body;
+
+  const result = await unstageGitPaths({ projectId, paths });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/discard (Endpoint #45)
+ * Discard working copy changes of specific paths or all files (".").
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const discard = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { paths } = req.body;
+
+  const result = await discardGitChanges({ projectId, paths });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/commit (Endpoint #46)
+ * Commit staged changes with commit message.
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const commit = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { message } = req.body;
+
+  const result = await commitStagedChanges({
+    projectId,
+    message,
+    user: req.user,
+  });
+
+  return sendSuccess(res, result, 201);
+});
+
+/**
+ * GET /api/v1/projects/:projectId/git/log (Endpoint #47)
+ * Get commit history for a branch.
+ * Access: Viewer+ (Blueprint & PDF Page 6)
+ */
+export const getLog = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { branch, page, limit } = req.query;
+
+  const result = await getGitLog({
+    projectId,
+    branch,
+    page,
+    limit,
+  });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * GET /api/v1/projects/:projectId/git/diff (Endpoint #48)
+ * Get file diff between working copy/index and HEAD, or commit vs parent.
+ * Access: Viewer+ (Blueprint & PDF Page 6)
+ */
+export const getDiff = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { path: rawPath, staged, commit: commitSha } = req.query;
+
+  const result = await getGitDiff({
+    projectId,
+    path: rawPath,
+    staged,
+    commit: commitSha,
+  });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * GET /api/v1/projects/:projectId/git/branches (Endpoint #49)
+ * List all local and remote branches.
+ * Access: Viewer+ (Blueprint & PDF Page 6)
+ */
+export const getBranches = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+
+  const result = await getGitBranches(projectId);
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/branches (Endpoint #50)
+ * Create a new branch.
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const createBranch = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { name, from, checkout } = req.body;
+
+  const result = await createGitBranch({
+    projectId,
+    name,
+    from,
+    checkout,
+  });
+
+  return sendSuccess(res, result, 201);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/checkout (Endpoint #51)
+ * Switch branch.
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const checkoutBranch = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { branch, force } = req.body;
+
+  const result = await checkoutGitBranch({
+    projectId,
+    branch,
+    force,
+  });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * DELETE /api/v1/projects/:projectId/git/branches/:name (Endpoint #52)
+ * Delete a branch.
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const deleteBranch = asyncHandler(async (req, res) => {
+  const { projectId, name } = req.params;
+
+  await deleteGitBranch({
+    projectId,
+    name,
+  });
+
+  return res.status(204).end();
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/pull (Endpoint #53)
+ * Pull from remote repository.
+ * Access: Owner (Blueprint & PDF Page 6)
+ */
+export const pull = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { branch } = req.body || {};
+
+  const result = await pullGitRepository({
+    projectId,
+    branch,
+    user: req.user,
+  });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/push (Endpoint #54)
+ * Push to remote repository.
+ * Access: Owner (Blueprint & PDF Page 6)
+ */
+export const push = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { branch } = req.body || {};
+
+  const result = await pushGitRepository({
+    projectId,
+    branch,
+  });
+
+  return sendSuccess(res, result, 200);
 });
