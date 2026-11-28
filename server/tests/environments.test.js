@@ -14,10 +14,16 @@ import { getRuntimes } from '../src/controllers/environment.controller.js';
 import {
   environmentProjectIdSchema,
   saveEnvironmentSchema,
+  buildEnvironmentSchema,
+  getBuildLogSchema,
+  resetEnvironmentSchema,
 } from '../src/validators/environment.schema.js';
 import {
   getProjectEnvironment,
   saveProjectEnvironment,
+  rebuildProjectEnvironment,
+  getProjectBuildLog,
+  resetProjectEnvironment,
   computeConfigHash,
   dockerfileFor,
 } from '../src/services/environment.service.js';
@@ -321,5 +327,129 @@ test('Endpoint #55: Environments Runtime Catalogue (Blueprint Section 7.10 & Pag
     assert.equal(canConfigureEnv('owner'), true);
     assert.equal(canConfigureEnv('editor'), false);
     assert.equal(canConfigureEnv('viewer'), false);
+
+    // Endpoint 58: Owner only
+    const canRebuildEnv = (role) => RANK[role] >= RANK.owner;
+    assert.equal(canRebuildEnv('owner'), true);
+    assert.equal(canRebuildEnv('editor'), false);
+    assert.equal(canRebuildEnv('viewer'), false);
+
+    // Endpoint 59: Viewer+
+    const canViewBuildLog = (role) => RANK[role] >= RANK.viewer;
+    assert.equal(canViewBuildLog('owner'), true);
+    assert.equal(canViewBuildLog('editor'), true);
+    assert.equal(canViewBuildLog('viewer'), true);
+
+    // Endpoint 60: Owner only
+    const canResetEnv = (role) => RANK[role] >= RANK.owner;
+    assert.equal(canResetEnv('owner'), true);
+    assert.equal(canResetEnv('editor'), false);
+    assert.equal(canResetEnv('viewer'), false);
+  });
+
+  await t.test('Endpoints #58-#60: Force Rebuild, Build Log & Reset Environment (Mastermind M3)', async () => {
+    const testProjectId = '77777777-7777-4777-a777-777777777777';
+    const envFile = path.join(ENV_STORAGE_DIR, `${testProjectId}.json`);
+
+    // Clean up any stale state
+    if (fs.existsSync(envFile)) {
+      await fs.promises.unlink(envFile);
+    }
+
+    // 1. Endpoint #58 on unconfigured project -> throws 404 NOT_FOUND
+    await assert.rejects(
+      async () => {
+        await rebuildProjectEnvironment({
+          projectId: testProjectId,
+          user: { id: 'u1', name: 'Naman K' },
+        });
+      },
+      (err) => {
+        assert.equal(err.statusCode, 404);
+        assert.equal(err.code, 'NOT_FOUND');
+        return true;
+      }
+    );
+
+    // 2. Endpoint #59 on unconfigured project -> returns status none with empty log
+    const emptyLog = await getProjectBuildLog(testProjectId);
+    assert.equal(emptyLog.status, 'none');
+    assert.equal(emptyLog.log, '');
+    assert.equal(emptyLog.builtAt, null);
+
+    // 3. Configure project environment
+    const spec = {
+      runtime: 'python',
+      runtimeVersion: '3.12',
+      dependencies: [{ manager: 'pip', name: 'fastapi', version: '0.115.0' }],
+      envVars: { ENV: 'production' },
+      executionMode: 'environment',
+    };
+
+    await saveProjectEnvironment({
+      projectId: testProjectId,
+      spec,
+      user: { id: 'u1', name: 'Naman K' },
+    });
+
+    // 4. Endpoint #58 when status is building -> throws 409 ENVIRONMENT_BUILDING
+    await assert.rejects(
+      async () => {
+        await rebuildProjectEnvironment({
+          projectId: testProjectId,
+          user: { id: 'u1', name: 'Naman K' },
+        });
+      },
+      (err) => {
+        assert.equal(err.statusCode, 409);
+        assert.equal(err.code, 'ENVIRONMENT_BUILDING');
+        return true;
+      }
+    );
+
+    // Wait briefly for background pipeline initialization
+    await new Promise((r) => setTimeout(r, 60));
+
+    // Simulate build completion to 'ready'
+    const envData = JSON.parse(await fs.promises.readFile(envFile, 'utf8'));
+    envData.status = 'ready';
+    envData.builtAt = new Date().toISOString();
+    envData.buildLog += 'Successfully installed fastapi==0.115.0\n';
+    await fs.promises.writeFile(envFile, JSON.stringify(envData, null, 2), 'utf8');
+
+    // 5. Endpoint #58 Force rebuild -> successfully transitions to building
+    const rebuildResult = await rebuildProjectEnvironment({
+      projectId: testProjectId,
+      user: { id: 'u1', name: 'Naman K' },
+      skipDockerCheck: true,
+    });
+    assert.equal(rebuildResult.status, 'building');
+
+    const rebuildingEnv = await getProjectEnvironment(testProjectId);
+    assert.ok(['building', 'ready'].includes(rebuildingEnv.status));
+    assert.ok(rebuildingEnv.buildLog.includes('[Force rebuild started]'));
+
+    // 6. Endpoint #59: Build Log retrieval and 200 KB capping test
+    const buildLogData = await getProjectBuildLog(testProjectId);
+    assert.ok(['building', 'ready'].includes(buildLogData.status));
+    assert.ok(buildLogData.log.includes('[Force rebuild started]'));
+
+    // Test log capping on huge log > 200 KB
+    const hugeLog = 'X'.repeat(250 * 1024);
+    envData.buildLog = hugeLog;
+    await fs.promises.writeFile(envFile, JSON.stringify(envData, null, 2), 'utf8');
+
+    const cappedLogData = await getProjectBuildLog(testProjectId);
+    assert.equal(cappedLogData.log.length, 200 * 1024);
+
+    // 7. Endpoint #60: Reset Environment -> deletes configuration and container/image
+    await resetProjectEnvironment({ projectId: testProjectId });
+    const resetEnv = await getProjectEnvironment(testProjectId);
+    assert.equal(resetEnv.configured, false);
+    assert.equal(fs.existsSync(envFile), false);
+
+    // Post-reset build log returns none
+    const postResetLog = await getProjectBuildLog(testProjectId);
+    assert.equal(postResetLog.status, 'none');
   });
 });

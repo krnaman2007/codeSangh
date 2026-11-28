@@ -83,3 +83,8 @@ export const saveEnvironmentSchema = z.object({
       }
     ),
 });
+
+// Endpoints #58, #59, #60 schema aliases
+export const buildEnvironmentSchema = environmentProjectIdSchema;
+export const getBuildLogSchema = environmentProjectIdSchema;
+export const resetEnvironmentSchema = environmentProjectIdSchema;

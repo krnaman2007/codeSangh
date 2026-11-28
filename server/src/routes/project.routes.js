@@ -58,6 +58,9 @@ import {
 import {
   getEnvironment,
   saveEnvironment,
+  rebuildEnvironment,
+  getBuildLog,
+  resetEnvironment,
 } from '../controllers/environment.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
@@ -118,6 +121,9 @@ import {
 import {
   environmentProjectIdSchema,
   saveEnvironmentSchema,
+  buildEnvironmentSchema,
+  getBuildLogSchema,
+  resetEnvironmentSchema,
 } from '../validators/environment.schema.js';
 
 const router = Router();
@@ -450,6 +456,33 @@ router.put(
   validate(saveEnvironmentSchema),
   requireRole('owner'),
   saveEnvironment
+);
+
+// Endpoint #58: POST /api/v1/projects/:projectId/environment/build (Owner)
+router.post(
+  '/:projectId/environment/build',
+  authenticate,
+  validate(buildEnvironmentSchema),
+  requireRole('owner'),
+  rebuildEnvironment
+);
+
+// Endpoint #59: GET /api/v1/projects/:projectId/environment/build-log (Viewer+)
+router.get(
+  '/:projectId/environment/build-log',
+  authenticate,
+  validate(getBuildLogSchema),
+  requireRole('viewer'),
+  getBuildLog
+);
+
+// Endpoint #60: DELETE /api/v1/projects/:projectId/environment (Owner)
+router.delete(
+  '/:projectId/environment',
+  authenticate,
+  validate(resetEnvironmentSchema),
+  requireRole('owner'),
+  resetEnvironment
 );
 
 export default router;

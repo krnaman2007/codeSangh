@@ -1,0 +1,36 @@
+{
+  "configured": true,
+  "projectId": "7d6e5c4b-3a21-4f09-8811-aa22bb33cc44",
+  "runtime": "node",
+  "runtimeVersion": "20",
+  "dependencies": [
+    {
+      "manager": "npm",
+      "name": "express",
+      "version": "4.19.2"
+    },
+    {
+      "manager": "apt",
+      "name": "curl",
+      "version": "7.88.1"
+    }
+  ],
+  "envVars": {
+    "NODE_ENV": "production",
+    "APP_PORT": "8080"
+  },
+  "setupCommand": "npm install",
+  "runCommand": "node server.js",
+  "executionMode": "environment",
+  "configHash": "b87c5f152edc6350be74527a3ff2f51d632c0440f8ddd54ac17f1323e859ba8d",
+  "imageTag": "devsync/proj-7d6e5c4b:b87c5f152edc",
+  "status": "ready",
+  "dockerfile": "FROM node:20-bookworm-slim\nRUN useradd -m -u 1000 dev\nWORKDIR /workspace\nRUN apt-get update && apt-get install -y --no-install-recommends curl=7.88.1 && rm -rf /var/lib/apt/lists/*\nRUN npm install -g express@4.19.2\nENV NODE_ENV=\"production\"\nENV APP_PORT=\"8080\"\nRUN npm install\nUSER dev",
+  "buildLog": "[Build started] Generating environment image devsync/proj-7d6e5c4b:b87c5f152edc...\n\n[Build finished] Status: ready. Tagged: devsync/proj-7d6e5c4b:b87c5f152edc\n",
+  "builtAt": "2026-11-28T07:23:27.342Z",
+  "updatedBy": {
+    "id": "u1",
+    "name": "Naman K"
+  },
+  "updatedAt": "2026-11-28T07:23:27.320Z"
+}

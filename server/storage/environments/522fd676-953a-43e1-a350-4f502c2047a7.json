@@ -1,0 +1,36 @@
+{
+  "configured": true,
+  "projectId": "522fd676-953a-43e1-a350-4f502c2047a7",
+  "runtime": "node",
+  "runtimeVersion": "20",
+  "dependencies": [
+    {
+      "manager": "npm",
+      "name": "express",
+      "version": "4.19.2"
+    },
+    {
+      "manager": "npm",
+      "name": "cors",
+      "version": "2.8.5"
+    }
+  ],
+  "envVars": {
+    "NODE_ENV": "development",
+    "PORT": "3000"
+  },
+  "setupCommand": "npm install",
+  "runCommand": null,
+  "executionMode": "environment",
+  "configHash": "d3f03883aa4b238c006dbf66d8351214f3205df1710111f23183e67c7e5584a8",
+  "imageTag": "devsync/proj-522fd676:d3f03883aa4b",
+  "status": "ready",
+  "dockerfile": "FROM node:20-bookworm-slim\nRUN useradd -m -u 1000 dev\nWORKDIR /workspace\nRUN npm install -g express@4.19.2 cors@2.8.5\nENV NODE_ENV=\"development\"\nENV PORT=\"3000\"\nRUN npm install\nUSER dev",
+  "buildLog": "[Build started] Generating environment image devsync/proj-522fd676:d3f03883aa4b...\n[Build step 1/3] Base image node:20-bookworm-slim pulled.\n[Build step 2/3] Installed dependencies (2 packages).\n[Build step 3/3] Successfully tagged devsync/proj-522fd676:d3f03883aa4b.\n[Build finished] Status: ready.\n",
+  "builtAt": "2026-11-28T07:15:50.213Z",
+  "updatedBy": {
+    "id": "9d2f5847-ccb6-4d0b-a03a-6cfc94153e06",
+    "name": "Naman"
+  },
+  "updatedAt": "2026-11-28T07:15:50.092Z"
+}
