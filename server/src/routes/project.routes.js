@@ -55,6 +55,10 @@ import {
   pull,
   push,
 } from '../controllers/git.controller.js';
+import {
+  getEnvironment,
+  saveEnvironment,
+} from '../controllers/environment.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
 import { requireRole } from '../middleware/projectAccess.js';
@@ -111,6 +115,10 @@ import {
   pullGitSchema,
   pushGitSchema,
 } from '../validators/git.schema.js';
+import {
+  environmentProjectIdSchema,
+  saveEnvironmentSchema,
+} from '../validators/environment.schema.js';
 
 const router = Router();
 
@@ -424,6 +432,24 @@ router.post(
   validate(pushGitSchema),
   requireRole('owner'),
   push
+);
+
+// Endpoint #56: GET /api/v1/projects/:projectId/environment (Viewer+)
+router.get(
+  '/:projectId/environment',
+  authenticate,
+  validate(environmentProjectIdSchema),
+  requireRole('viewer'),
+  getEnvironment
+);
+
+// Endpoint #57: PUT /api/v1/projects/:projectId/environment (Owner)
+router.put(
+  '/:projectId/environment',
+  authenticate,
+  validate(saveEnvironmentSchema),
+  requireRole('owner'),
+  saveEnvironment
 );
 
 export default router;
