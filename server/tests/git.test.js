@@ -14,6 +14,11 @@ import {
   gitLogSchema,
   gitDiffSchema,
   gitBranchesSchema,
+  createBranchSchema,
+  checkoutBranchSchema,
+  deleteBranchSchema,
+  pullGitSchema,
+  pushGitSchema,
 } from '../src/validators/git.schema.js';
 import {
   initGitRepository,
@@ -29,6 +34,11 @@ import {
   getGitLog,
   getGitDiff,
   getGitBranches,
+  createGitBranch,
+  checkoutGitBranch,
+  deleteGitBranch,
+  pullGitRepository,
+  pushGitRepository,
 } from '../src/services/git.service.js';
 import git from 'isomorphic-git';
 
@@ -549,6 +559,243 @@ test('Git Version Control Module (Endpoints 38-42 - Mastermind M2)', async (t) =
     assert.equal(canReadGitInfo('owner'), true);
     assert.equal(canReadGitInfo('editor'), true);
     assert.equal(canReadGitInfo('viewer'), true);
+
+    // Cleanup
+    if (fs.existsSync(testDir)) {
+      await fs.promises.rm(testDir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('Endpoints #50-#54: Branch, Checkout, Pull & Push Schemas (Blueprint 7.2)', async () => {
+    // 1. createBranchSchema (Endpoint #50 - Editor+)
+    const validCreateBranch = createBranchSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { name: 'feature/login', from: 'main', checkout: true },
+    });
+    assert.equal(validCreateBranch.success, true);
+    assert.equal(validCreateBranch.data.body.name, 'feature/login');
+    assert.equal(validCreateBranch.data.body.checkout, true);
+
+    const invalidNameTraversal = createBranchSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { name: 'feature/../hack' },
+    });
+    assert.equal(invalidNameTraversal.success, false);
+
+    const invalidLeadingDash = createBranchSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { name: '-invalid-name' },
+    });
+    assert.equal(invalidLeadingDash.success, false);
+
+    // 2. checkoutBranchSchema (Endpoint #51 - Editor+)
+    const validCheckout = checkoutBranchSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { branch: 'feature/login', force: false },
+    });
+    assert.equal(validCheckout.success, true);
+    assert.equal(validCheckout.data.body.force, false);
+
+    const invalidEmptyCheckout = checkoutBranchSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { branch: '' },
+    });
+    assert.equal(invalidEmptyCheckout.success, false);
+
+    // 3. deleteBranchSchema (Endpoint #52 - Editor+)
+    const validDeleteBranch = deleteBranchSchema.safeParse({
+      params: { projectId: validProjectId, name: 'feature/login' },
+    });
+    assert.equal(validDeleteBranch.success, true);
+
+    // 4. pullGitSchema & pushGitSchema (Endpoints #53 & #54 - Owner)
+    const validPull = pullGitSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { branch: 'main' },
+    });
+    assert.equal(validPull.success, true);
+
+    const validPush = pushGitSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: {},
+    });
+    assert.equal(validPush.success, true);
+  });
+
+  await t.test('Real Git Operations: Branch, Checkout, Delete, Pull & Push (Endpoints 50-54)', async () => {
+    const testDir = getProjectGitDir(testProjectId);
+
+    if (fs.existsSync(testDir)) {
+      await fs.promises.rm(testDir, { recursive: true, force: true });
+    }
+
+    // 1. Initialize repo with commit
+    await initGitRepository({
+      projectId: testProjectId,
+      defaultBranch: 'main',
+      user: { id: 'u1', name: 'Naman K', email: 'naman@devsync.io' },
+      files: [{ path: 'app.js', content: 'console.log("Main branch code");\n' }],
+    });
+
+    // 2. Endpoint #50: create branch
+    const branchRes = await createGitBranch({
+      projectId: testProjectId,
+      name: 'feature/test-branch',
+      from: 'main',
+      checkout: false,
+    });
+    assert.equal(branchRes.branch.name, 'feature/test-branch');
+    assert.equal(branchRes.branch.sha.length, 40);
+
+    // Duplicate branch creation throws 409 BRANCH_EXISTS
+    await assert.rejects(
+      async () => {
+        await createGitBranch({
+          projectId: testProjectId,
+          name: 'feature/test-branch',
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'BRANCH_EXISTS');
+        assert.equal(err.statusCode, 409);
+        return true;
+      }
+    );
+
+    // 3. Endpoint #51: checkout branch
+    const checkoutRes = await checkoutGitBranch({
+      projectId: testProjectId,
+      branch: 'feature/test-branch',
+      force: false,
+    });
+    assert.equal(checkoutRes.branch, 'feature/test-branch');
+
+    const statusAfterCheckout = await getGitStatus(testProjectId);
+    assert.equal(statusAfterCheckout.branch, 'feature/test-branch');
+
+    // 4. Dirty working tree prevents checkout without force (409 DIRTY_WORKING_TREE)
+    await fs.promises.writeFile(path.join(testDir, 'app.js'), 'console.log("Uncommitted dirty code");\n');
+    await assert.rejects(
+      async () => {
+        await checkoutGitBranch({
+          projectId: testProjectId,
+          branch: 'main',
+          force: false,
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'DIRTY_WORKING_TREE');
+        assert.equal(err.statusCode, 409);
+        return true;
+      }
+    );
+
+    // Force checkout succeeds
+    await checkoutGitBranch({
+      projectId: testProjectId,
+      branch: 'main',
+      force: true,
+    });
+    const statusBackOnMain = await getGitStatus(testProjectId);
+    assert.equal(statusBackOnMain.branch, 'main');
+
+    // Checkout non-existent branch throws 404 NOT_FOUND
+    await assert.rejects(
+      async () => {
+        await checkoutGitBranch({
+          projectId: testProjectId,
+          branch: 'non-existent-branch',
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'NOT_FOUND');
+        assert.equal(err.statusCode, 404);
+        return true;
+      }
+    );
+
+    // 5. Endpoint #52: delete branch
+    // Cannot delete currently checked-out branch
+    await assert.rejects(
+      async () => {
+        await deleteGitBranch({
+          projectId: testProjectId,
+          name: 'main',
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'CANNOT_DELETE_CURRENT');
+        assert.equal(err.statusCode, 400);
+        return true;
+      }
+    );
+
+    // Delete feature/test-branch succeeds
+    const deleteRes = await deleteGitBranch({
+      projectId: testProjectId,
+      name: 'feature/test-branch',
+    });
+    assert.equal(deleteRes.success, true);
+
+    // Deleting non-existent branch throws 404
+    await assert.rejects(
+      async () => {
+        await deleteGitBranch({
+          projectId: testProjectId,
+          name: 'feature/test-branch',
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'NOT_FOUND');
+        assert.equal(err.statusCode, 404);
+        return true;
+      }
+    );
+
+    // 6. Endpoints #53 & #54: Pull & Push without remote -> 400 NO_REMOTE
+    await assert.rejects(
+      async () => {
+        await pullGitRepository({
+          projectId: testProjectId,
+          branch: 'main',
+          user: { name: 'Test', email: 'test@devsync.io' },
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'NO_REMOTE');
+        assert.equal(err.statusCode, 400);
+        return true;
+      }
+    );
+
+    await assert.rejects(
+      async () => {
+        await pushGitRepository({
+          projectId: testProjectId,
+          branch: 'main',
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'NO_REMOTE');
+        assert.equal(err.statusCode, 400);
+        return true;
+      }
+    );
+
+    // 7. Role permissions matrix for Endpoints 50-54
+    const RANK = { viewer: 1, editor: 2, owner: 3 };
+
+    // Endpoints 50-52: Editor+
+    const canManageBranches = (role) => RANK[role] >= RANK.editor;
+    assert.equal(canManageBranches('owner'), true);
+    assert.equal(canManageBranches('editor'), true);
+    assert.equal(canManageBranches('viewer'), false);
+
+    // Endpoints 53-54: Owner only
+    const canPullPush = (role) => RANK[role] >= RANK.owner;
+    assert.equal(canPullPush('owner'), true);
+    assert.equal(canPullPush('editor'), false);
+    assert.equal(canPullPush('viewer'), false);
 
     // Cleanup
     if (fs.existsSync(testDir)) {

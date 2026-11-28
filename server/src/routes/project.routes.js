@@ -49,6 +49,11 @@ import {
   getLog,
   getDiff,
   getBranches,
+  createBranch,
+  checkoutBranch,
+  deleteBranch,
+  pull,
+  push,
 } from '../controllers/git.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
@@ -100,6 +105,11 @@ import {
   gitLogSchema,
   gitDiffSchema,
   gitBranchesSchema,
+  createBranchSchema,
+  checkoutBranchSchema,
+  deleteBranchSchema,
+  pullGitSchema,
+  pushGitSchema,
 } from '../validators/git.schema.js';
 
 const router = Router();
@@ -369,6 +379,51 @@ router.get(
   validate(gitBranchesSchema),
   requireRole('viewer'),
   getBranches
+);
+
+// Endpoint #50: POST /api/v1/projects/:projectId/git/branches (Editor+)
+router.post(
+  '/:projectId/git/branches',
+  authenticate,
+  validate(createBranchSchema),
+  requireRole('editor'),
+  createBranch
+);
+
+// Endpoint #51: POST /api/v1/projects/:projectId/git/checkout (Editor+)
+router.post(
+  '/:projectId/git/checkout',
+  authenticate,
+  validate(checkoutBranchSchema),
+  requireRole('editor'),
+  checkoutBranch
+);
+
+// Endpoint #52: DELETE /api/v1/projects/:projectId/git/branches/:name (Editor+)
+router.delete(
+  '/:projectId/git/branches/:name',
+  authenticate,
+  validate(deleteBranchSchema),
+  requireRole('editor'),
+  deleteBranch
+);
+
+// Endpoint #53: POST /api/v1/projects/:projectId/git/pull (Owner)
+router.post(
+  '/:projectId/git/pull',
+  authenticate,
+  validate(pullGitSchema),
+  requireRole('owner'),
+  pull
+);
+
+// Endpoint #54: POST /api/v1/projects/:projectId/git/push (Owner)
+router.post(
+  '/:projectId/git/push',
+  authenticate,
+  validate(pushGitSchema),
+  requireRole('owner'),
+  push
 );
 
 export default router;

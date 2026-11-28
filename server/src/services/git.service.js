@@ -768,3 +768,232 @@ export async function getGitBranches(projectId) {
     throw new ApiError(500, 'GIT_BRANCHES_FAILED', `Failed to list branches: ${err.message}`);
   }
 }
+
+/**
+ * Creates a new branch from a specified ref or current branch (Endpoint #50 - Mastermind M2)
+ */
+export async function createGitBranch({ projectId, name, from, checkout = false }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  return withGitLock(projectId, async () => {
+    const existing = await git.listBranches({ fs, dir });
+    if (existing.includes(name)) {
+      throw new ApiError(409, 'BRANCH_EXISTS', `Branch '${name}' already exists`);
+    }
+
+    try {
+      const fromRef = from || (await git.currentBranch({ fs, dir })) || 'main';
+      await git.branch({ fs, dir, ref: name, object: fromRef });
+
+      let sha = null;
+      try {
+        sha = await git.resolveRef({ fs, dir, ref: name });
+      } catch {
+        // Empty repo
+      }
+
+      if (checkout) {
+        await git.checkout({ fs, dir, ref: name, force: true });
+      }
+
+      return {
+        branch: {
+          name,
+          sha,
+        },
+      };
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(500, 'GIT_BRANCH_FAILED', `Failed to create branch: ${err.message}`);
+    }
+  });
+}
+
+/**
+ * Checks out an existing branch (Endpoint #51 - Mastermind M2)
+ */
+export async function checkoutGitBranch({ projectId, branch, force = false }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  return withGitLock(projectId, async () => {
+    const existing = await git.listBranches({ fs, dir });
+    if (!existing.includes(branch)) {
+      throw new ApiError(404, 'NOT_FOUND', `Branch '${branch}' not found`);
+    }
+
+    if (!force) {
+      const status = await getGitStatus(projectId);
+      if (!status.clean) {
+        throw new ApiError(409, 'DIRTY_WORKING_TREE', 'Checkout blocked: working tree has uncommitted changes');
+      }
+    }
+
+    try {
+      await git.checkout({ fs, dir, ref: branch, force: Boolean(force) });
+
+      return {
+        branch,
+        changedFiles: 0,
+      };
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(500, 'GIT_CHECKOUT_FAILED', `Failed to checkout branch: ${err.message}`);
+    }
+  });
+}
+
+/**
+ * Deletes a branch by name (Endpoint #52 - Mastermind M2)
+ */
+export async function deleteGitBranch({ projectId, name }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  return withGitLock(projectId, async () => {
+    const current = (await git.currentBranch({ fs, dir })) || 'main';
+    if (name === current) {
+      throw new ApiError(400, 'CANNOT_DELETE_CURRENT', 'Cannot delete the currently checked out branch');
+    }
+
+    const existing = await git.listBranches({ fs, dir });
+    if (!existing.includes(name)) {
+      throw new ApiError(404, 'NOT_FOUND', `Branch '${name}' not found`);
+    }
+
+    try {
+      await git.deleteBranch({ fs, dir, ref: name });
+      return { success: true };
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(500, 'GIT_DELETE_BRANCH_FAILED', `Failed to delete branch: ${err.message}`);
+    }
+  });
+}
+
+/**
+ * Pulls changes from remote repository (Endpoint #53 - Mastermind M2)
+ */
+export async function pullGitRepository({ projectId, branch, user }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  return withGitLock(projectId, async () => {
+    // 1. Check uncommitted changes in working tree
+    const status = await getGitStatus(projectId);
+    if (!status.clean) {
+      throw new ApiError(409, 'DIRTY_WORKING_TREE', 'Pull blocked: working tree has uncommitted changes');
+    }
+
+    // 2. Check remote configured
+    const remotes = await git.listRemotes({ fs, dir });
+    if (!remotes || remotes.length === 0) {
+      throw new ApiError(400, 'NO_REMOTE', 'No remote configured. Use PUT /git/remote first.');
+    }
+
+    const currentBranch = branch || (await git.currentBranch({ fs, dir })) || 'main';
+
+    let token = null;
+    try {
+      const authFile = path.join(dir, '.git', 'devsync-auth.json');
+      if (fs.existsSync(authFile)) {
+        const raw = JSON.parse(await fs.promises.readFile(authFile, 'utf8'));
+        token = raw.token;
+      }
+    } catch {
+      // Ignore
+    }
+
+    try {
+      const pullResult = await git.pull({
+        fs,
+        http,
+        dir,
+        ref: currentBranch,
+        singleBranch: true,
+        author: {
+          name: user?.name || 'DevSync Developer',
+          email: user?.email || 'dev@devsync.io',
+        },
+        onAuth: () => (token ? { username: token } : undefined),
+      });
+
+      return {
+        result: pullResult || 'up-to-date',
+      };
+    } catch (err) {
+      if (err.name === 'MergeConflictError' || err.code === 'MergeConflictError') {
+        const conflicts = err.data?.filepaths || [];
+        throw new ApiError(409, 'MERGE_CONFLICTS', 'Pull aborted due to merge conflicts', conflicts);
+      }
+      throw new ApiError(502, 'GIT_REMOTE_ERROR', `Git remote error: ${err.message}`);
+    }
+  });
+}
+
+/**
+ * Pushes changes to remote repository (Endpoint #54 - Mastermind M2)
+ */
+export async function pushGitRepository({ projectId, branch }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  return withGitLock(projectId, async () => {
+    // 1. Check remote configured
+    const remotes = await git.listRemotes({ fs, dir });
+    if (!remotes || remotes.length === 0) {
+      throw new ApiError(400, 'NO_REMOTE', 'No remote configured. Use PUT /git/remote first.');
+    }
+
+    const currentBranch = branch || (await git.currentBranch({ fs, dir })) || 'main';
+
+    let token = null;
+    try {
+      const authFile = path.join(dir, '.git', 'devsync-auth.json');
+      if (fs.existsSync(authFile)) {
+        const raw = JSON.parse(await fs.promises.readFile(authFile, 'utf8'));
+        token = raw.token;
+      }
+    } catch {
+      // Ignore
+    }
+
+    try {
+      const pushResult = await git.push({
+        fs,
+        http,
+        dir,
+        remote: 'origin',
+        ref: currentBranch,
+        onAuth: () => (token ? { username: token } : undefined),
+      });
+
+      return {
+        pushed: true,
+        ref: `refs/heads/${currentBranch}`,
+        result: pushResult,
+      };
+    } catch (err) {
+      if (err.name === 'PushRejectedError' || err.code === 'PushRejectedError') {
+        throw new ApiError(409, 'NON_FAST_FORWARD', 'Push rejected: remote has newer changes. Pull first.');
+      }
+      throw new ApiError(502, 'GIT_REMOTE_ERROR', `Git remote error: ${err.message}`);
+    }
+  });
+}

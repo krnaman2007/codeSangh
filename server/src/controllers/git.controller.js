@@ -14,6 +14,11 @@ import {
   getGitLog,
   getGitDiff,
   getGitBranches,
+  createGitBranch,
+  checkoutGitBranch,
+  deleteGitBranch,
+  pullGitRepository,
+  pushGitRepository,
 } from '../services/git.service.js';
 import { findNodeById } from '../repositories/node.repo.js';
 import { computeNodePath } from '../utils/treeUtils.js';
@@ -289,6 +294,94 @@ export const getBranches = asyncHandler(async (req, res) => {
   const { projectId } = req.params;
 
   const result = await getGitBranches(projectId);
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/branches (Endpoint #50)
+ * Create a new branch.
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const createBranch = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { name, from, checkout } = req.body;
+
+  const result = await createGitBranch({
+    projectId,
+    name,
+    from,
+    checkout,
+  });
+
+  return sendSuccess(res, result, 201);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/checkout (Endpoint #51)
+ * Switch branch.
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const checkoutBranch = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { branch, force } = req.body;
+
+  const result = await checkoutGitBranch({
+    projectId,
+    branch,
+    force,
+  });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * DELETE /api/v1/projects/:projectId/git/branches/:name (Endpoint #52)
+ * Delete a branch.
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const deleteBranch = asyncHandler(async (req, res) => {
+  const { projectId, name } = req.params;
+
+  await deleteGitBranch({
+    projectId,
+    name,
+  });
+
+  return res.status(204).end();
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/pull (Endpoint #53)
+ * Pull from remote repository.
+ * Access: Owner (Blueprint & PDF Page 6)
+ */
+export const pull = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { branch } = req.body || {};
+
+  const result = await pullGitRepository({
+    projectId,
+    branch,
+    user: req.user,
+  });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/push (Endpoint #54)
+ * Push to remote repository.
+ * Access: Owner (Blueprint & PDF Page 6)
+ */
+export const push = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { branch } = req.body || {};
+
+  const result = await pushGitRepository({
+    projectId,
+    branch,
+  });
 
   return sendSuccess(res, result, 200);
 });

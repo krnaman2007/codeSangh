@@ -157,3 +157,63 @@ export const gitBranchesSchema = z.object({
     projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
   }),
 });
+
+export const createBranchSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  body: z.object({
+    name: z
+      .string()
+      .trim()
+      .min(1, 'Branch name cannot be empty')
+      .max(100, 'Branch name cannot exceed 100 characters')
+      .regex(/^[A-Za-z0-9._/-]{1,100}$/, 'Branch name contains invalid characters')
+      .refine((val) => !val.includes('..') && !val.startsWith('-'), {
+        message: 'Branch name cannot contain ".." or start with "-"',
+      }),
+    from: z.string().trim().min(1).max(100).optional(),
+    checkout: z.boolean().optional().default(false),
+  }),
+});
+
+export const checkoutBranchSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  body: z.object({
+    branch: z.string().trim().min(1, 'Branch name is required').max(100),
+    force: z.boolean().optional().default(false),
+  }),
+});
+
+export const deleteBranchSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+    name: z.string().trim().min(1, 'Branch name is required'),
+  }),
+});
+
+export const pullGitSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  body: z
+    .object({
+      branch: z.string().trim().min(1).max(100).optional(),
+    })
+    .optional()
+    .default({}),
+});
+
+export const pushGitSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  body: z
+    .object({
+      branch: z.string().trim().min(1).max(100).optional(),
+    })
+    .optional()
+    .default({}),
+});
