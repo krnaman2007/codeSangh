@@ -7,6 +7,10 @@ import {
   initGitSchema,
   setRemoteSchema,
   cloneGitSchema,
+  stagePathsSchema,
+  unstagePathsSchema,
+  discardPathsSchema,
+  commitGitSchema,
 } from '../src/validators/git.schema.js';
 import {
   initGitRepository,
@@ -14,6 +18,11 @@ import {
   getProjectGitDir,
   setGitRemote,
   getGitStatus,
+  stageGitPaths,
+  unstageGitPaths,
+  discardGitChanges,
+  commitStagedChanges,
+  withGitLock,
 } from '../src/services/git.service.js';
 
 test('Git Version Control Module (Endpoints 38-42 - Mastermind M2)', async (t) => {
@@ -167,5 +176,201 @@ test('Git Version Control Module (Endpoints 38-42 - Mastermind M2)', async (t) =
     assert.equal(canManageRemoteOrClone('owner'), true);
     assert.equal(canManageRemoteOrClone('editor'), false);
     assert.equal(canManageRemoteOrClone('viewer'), false);
+
+    // Endpoints 43-46: Editor+ (Stage, Unstage, Discard, Commit)
+    const canMutateGit = (role) => RANK[role] >= RANK.editor;
+    assert.equal(canMutateGit('owner'), true);
+    assert.equal(canMutateGit('editor'), true);
+    assert.equal(canMutateGit('viewer'), false);
+  });
+
+  await t.test('Endpoints #43-#45: stage, unstage & discard path schemas (Editor+)', async () => {
+    // Stage schema
+    const validStage = stagePathsSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { paths: ['src/app.js', 'README.md'] },
+    });
+    assert.equal(validStage.success, true);
+
+    const validStageAll = stagePathsSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { paths: ['.'] },
+    });
+    assert.equal(validStageAll.success, true);
+
+    const invalidEmptyStage = stagePathsSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { paths: [] },
+    });
+    assert.equal(invalidEmptyStage.success, false);
+
+    const invalidTraversalStage = stagePathsSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { paths: ['../../etc/passwd'] },
+    });
+    assert.equal(invalidTraversalStage.success, false);
+
+    // Unstage schema
+    const validUnstage = unstagePathsSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { paths: ['src/app.js'] },
+    });
+    assert.equal(validUnstage.success, true);
+
+    // Discard schema
+    const validDiscard = discardPathsSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { paths: ['src/app.js'] },
+    });
+    assert.equal(validDiscard.success, true);
+  });
+
+  await t.test('Endpoint #46: commitGitSchema (Editor+)', async () => {
+    const validCommit = commitGitSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { message: 'feat: add git stage and commit functionality' },
+    });
+    assert.equal(validCommit.success, true);
+
+    const emptyCommit = commitGitSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { message: '   ' },
+    });
+    assert.equal(emptyCommit.success, false);
+
+    const longCommit = commitGitSchema.safeParse({
+      params: { projectId: validProjectId },
+      body: { message: 'a'.repeat(501) },
+    });
+    assert.equal(longCommit.success, false);
+  });
+
+  await t.test('Real Git Operations: Stage, Commit, Unstage, Discard & Mutex (Endpoints 43-46)', async () => {
+    const testDir = getProjectGitDir(testProjectId);
+
+    if (fs.existsSync(testDir)) {
+      await fs.promises.rm(testDir, { recursive: true, force: true });
+    }
+
+    // 1. Initialize repo with index.js
+    await initGitRepository({
+      projectId: testProjectId,
+      defaultBranch: 'main',
+      user: { id: 'u1', name: 'Naman K', email: 'naman@devsync.io' },
+      files: [
+        { path: 'index.js', content: 'console.log("v1.0");\n' },
+      ],
+    });
+
+    // 2. Commit when nothing is staged -> 400 NOTHING_TO_COMMIT
+    await assert.rejects(
+      async () => {
+        await commitStagedChanges({
+          projectId: testProjectId,
+          message: 'Empty commit test',
+          user: { id: 'u1', name: 'Naman K', email: 'naman@devsync.io' },
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'NOTHING_TO_COMMIT');
+        assert.equal(err.statusCode, 400);
+        return true;
+      }
+    );
+
+    // 3. Modify index.js -> verify status is modified
+    await fs.promises.writeFile(path.join(testDir, 'index.js'), 'console.log("v1.1 modified");\n');
+    let status = await getGitStatus(testProjectId);
+    assert.ok(status.modified.includes('index.js'));
+    assert.equal(status.staged.length, 0);
+
+    // 4. Stage modified file (Endpoint #43)
+    const stageRes = await stageGitPaths({
+      projectId: testProjectId,
+      paths: ['index.js'],
+    });
+    assert.equal(stageRes.staged, 1);
+
+    status = await getGitStatus(testProjectId);
+    assert.ok(status.staged.includes('index.js'));
+
+    // 5. Commit staged change (Endpoint #46)
+    const commitRes = await commitStagedChanges({
+      projectId: testProjectId,
+      message: 'Update index to v1.1',
+      user: { id: 'u1', name: 'Naman K', email: 'naman@devsync.io' },
+    });
+    assert.ok(commitRes.commit);
+    assert.equal(commitRes.commit.sha.length, 40);
+    assert.equal(commitRes.commit.message, 'Update index to v1.1');
+    assert.equal(commitRes.commit.author.name, 'Naman K');
+    assert.equal(commitRes.commit.author.email, 'naman@devsync.io');
+
+    status = await getGitStatus(testProjectId);
+    assert.equal(status.clean, true);
+
+    // 6. Modify file again, stage it, then unstage it (Endpoint #44)
+    await fs.promises.writeFile(path.join(testDir, 'index.js'), 'console.log("v1.2 unstaged test");\n');
+    await stageGitPaths({
+      projectId: testProjectId,
+      paths: ['index.js'],
+    });
+    status = await getGitStatus(testProjectId);
+    assert.ok(status.staged.includes('index.js'));
+
+    const unstageRes = await unstageGitPaths({
+      projectId: testProjectId,
+      paths: ['index.js'],
+    });
+    assert.equal(unstageRes.unstaged, 1);
+
+    status = await getGitStatus(testProjectId);
+    assert.equal(status.staged.length, 0);
+    assert.ok(status.modified.includes('index.js'));
+
+    // 7. Discard modified changes (Endpoint #45) -> restores HEAD content
+    const discardRes = await discardGitChanges({
+      projectId: testProjectId,
+      paths: ['index.js'],
+    });
+    assert.equal(discardRes.discarded, 1);
+
+    const restoredContent = await fs.promises.readFile(path.join(testDir, 'index.js'), 'utf8');
+    assert.equal(restoredContent, 'console.log("v1.1 modified");\n');
+
+    status = await getGitStatus(testProjectId);
+    assert.equal(status.clean, true);
+
+    // 8. Create untracked file, discard it -> file deleted
+    const tempFile = path.join(testDir, 'temp.txt');
+    await fs.promises.writeFile(tempFile, 'temporary content');
+    status = await getGitStatus(testProjectId);
+    assert.ok(status.untracked.includes('temp.txt'));
+
+    await discardGitChanges({
+      projectId: testProjectId,
+      paths: ['temp.txt'],
+    });
+    assert.equal(fs.existsSync(tempFile), false);
+
+    // 9. Per-project Mutex: concurrent lock throws 409 GIT_BUSY
+    await assert.rejects(
+      async () => {
+        await withGitLock(testProjectId, async () => {
+          // Inside lock, try to acquire another lock on same project
+          await withGitLock(testProjectId, async () => {});
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'GIT_BUSY');
+        assert.equal(err.statusCode, 409);
+        return true;
+      }
+    );
+
+    // Cleanup
+    if (fs.existsSync(testDir)) {
+      await fs.promises.rm(testDir, { recursive: true, force: true });
+    }
   });
 });

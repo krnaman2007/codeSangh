@@ -304,3 +304,227 @@ export async function getGitStatus(projectId) {
     throw new ApiError(500, 'GIT_STATUS_FAILED', `Failed to get git status: ${err.message}`);
   }
 }
+
+// In-memory mutex for per-project mutating Git operations (Blueprint Section 7.9 & Page 30)
+const projectLocks = new Set();
+
+export async function withGitLock(projectId, fn) {
+  if (projectLocks.has(projectId)) {
+    throw new ApiError(409, 'GIT_BUSY', 'Another Git operation is currently running on this project');
+  }
+  projectLocks.add(projectId);
+  try {
+    return await fn();
+  } finally {
+    projectLocks.delete(projectId);
+  }
+}
+
+/**
+ * Stages paths or entire working directory (Endpoint #43 - Mastermind M2)
+ */
+export async function stageGitPaths({ projectId, paths }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  return withGitLock(projectId, async () => {
+    try {
+      let stagedCount = 0;
+
+      if (paths.includes('.')) {
+        const matrix = await git.statusMatrix({ fs, dir });
+        for (const [filepath, head, workdir] of matrix) {
+          if (filepath.startsWith('.git/')) continue;
+          if (workdir === 0 && head === 1) {
+            // Deleted in workdir, remove from git index
+            await git.remove({ fs, dir, filepath });
+            stagedCount++;
+          } else if (workdir === 2) {
+            // New or modified in workdir, add to git index
+            await git.add({ fs, dir, filepath });
+            stagedCount++;
+          }
+        }
+      } else {
+        for (const p of paths) {
+          const cleanPath = p.replace(/^\/+/, '');
+          const targetPath = path.join(dir, cleanPath);
+          const exists = fs.existsSync(targetPath);
+
+          if (exists) {
+            await git.add({ fs, dir, filepath: cleanPath });
+          } else {
+            try {
+              await git.remove({ fs, dir, filepath: cleanPath });
+            } catch {
+              // File wasn't tracked, ignore
+            }
+          }
+          stagedCount++;
+        }
+      }
+
+      return { staged: stagedCount };
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(500, 'GIT_STAGE_FAILED', `Failed to stage paths: ${err.message}`);
+    }
+  });
+}
+
+/**
+ * Unstages paths from the Git index (Endpoint #44 - Mastermind M2)
+ */
+export async function unstageGitPaths({ projectId, paths }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  return withGitLock(projectId, async () => {
+    try {
+      let unstagedCount = 0;
+
+      if (paths.includes('.')) {
+        const matrix = await git.statusMatrix({ fs, dir });
+        for (const [filepath, head, , stage] of matrix) {
+          if (filepath.startsWith('.git/')) continue;
+          if (head !== stage) {
+            await git.resetIndex({ fs, dir, filepath });
+            unstagedCount++;
+          }
+        }
+      } else {
+        for (const p of paths) {
+          const cleanPath = p.replace(/^\/+/, '');
+          await git.resetIndex({ fs, dir, filepath: cleanPath });
+          unstagedCount++;
+        }
+      }
+
+      return { unstaged: unstagedCount };
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(500, 'GIT_UNSTAGE_FAILED', `Failed to unstage paths: ${err.message}`);
+    }
+  });
+}
+
+/**
+ * Discards working copy changes, restoring HEAD content (Endpoint #45 - Mastermind M2)
+ */
+export async function discardGitChanges({ projectId, paths }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  return withGitLock(projectId, async () => {
+    try {
+      let discardedCount = 0;
+      let targetPaths = [];
+
+      if (paths.includes('.')) {
+        const matrix = await git.statusMatrix({ fs, dir });
+        for (const [filepath, head, workdir, stage] of matrix) {
+          if (filepath.startsWith('.git/')) continue;
+          if (head !== workdir || head !== stage) {
+            targetPaths.push(filepath);
+          }
+        }
+      } else {
+        targetPaths = paths.map((p) => p.replace(/^\/+/, ''));
+      }
+
+      for (const filepath of targetPaths) {
+        const targetPath = path.join(dir, filepath);
+        let inHead = false;
+        try {
+          const matrix = await git.statusMatrix({ fs, dir, filter: (f) => f === filepath });
+          if (matrix.length > 0 && matrix[0][1] === 1) {
+            inHead = true;
+          }
+        } catch {
+          // Ignore
+        }
+
+        if (inHead) {
+          // Restore working directory content from HEAD
+          await git.checkout({ fs, dir, filepaths: [filepath], force: true });
+          // Reset index entry as well
+          await git.resetIndex({ fs, dir, filepath });
+        } else {
+          // Untracked file: remove from working copy
+          if (fs.existsSync(targetPath)) {
+            await fs.promises.unlink(targetPath);
+          }
+          await git.resetIndex({ fs, dir, filepath }).catch(() => {});
+        }
+        discardedCount++;
+      }
+
+      return { discarded: discardedCount };
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(500, 'GIT_DISCARD_FAILED', `Failed to discard changes: ${err.message}`);
+    }
+  });
+}
+
+/**
+ * Commits staged changes to the repository (Endpoint #46 - Mastermind M2)
+ */
+export async function commitStagedChanges({ projectId, message, user }) {
+  const dir = getProjectGitDir(projectId);
+
+  if (!isGitInitialized(projectId)) {
+    throw new ApiError(400, 'GIT_NOT_INITIALIZED', 'Git repository is not initialized for this project');
+  }
+
+  return withGitLock(projectId, async () => {
+    try {
+      const matrix = await git.statusMatrix({ fs, dir });
+      const stagedFiles = matrix.filter(([filepath, head, , stage]) => {
+        if (filepath.startsWith('.git/')) return false;
+        return head !== stage;
+      });
+
+      if (stagedFiles.length === 0) {
+        throw new ApiError(400, 'NOTHING_TO_COMMIT', 'No changes staged to commit');
+      }
+
+      const author = {
+        name: user?.name || 'DevSync Developer',
+        email: user?.email || 'dev@devsync.io',
+      };
+
+      const sha = await git.commit({
+        fs,
+        dir,
+        message,
+        author,
+      });
+
+      return {
+        commit: {
+          sha,
+          message,
+          author: {
+            userId: user?.id,
+            name: author.name,
+            email: author.email,
+          },
+          committedAt: new Date().toISOString(),
+        },
+      };
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(500, 'GIT_COMMIT_FAILED', `Failed to commit staged changes: ${err.message}`);
+    }
+  });
+}

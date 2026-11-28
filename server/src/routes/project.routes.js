@@ -42,6 +42,10 @@ import {
   setRemote,
   cloneRepo,
   getStatus,
+  stage,
+  unstage,
+  discard,
+  commit,
 } from '../controllers/git.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
@@ -86,6 +90,10 @@ import {
   initGitSchema,
   setRemoteSchema,
   cloneGitSchema,
+  stagePathsSchema,
+  unstagePathsSchema,
+  discardPathsSchema,
+  commitGitSchema,
 } from '../validators/git.schema.js';
 
 const router = Router();
@@ -292,6 +300,42 @@ router.get(
   validate(gitRepoParamSchema),
   requireRole('viewer'),
   getStatus
+);
+
+// Endpoint #43: POST /api/v1/projects/:projectId/git/stage (Editor+)
+router.post(
+  '/:projectId/git/stage',
+  authenticate,
+  validate(stagePathsSchema),
+  requireRole('editor'),
+  stage
+);
+
+// Endpoint #44: POST /api/v1/projects/:projectId/git/unstage (Editor+)
+router.post(
+  '/:projectId/git/unstage',
+  authenticate,
+  validate(unstagePathsSchema),
+  requireRole('editor'),
+  unstage
+);
+
+// Endpoint #45: POST /api/v1/projects/:projectId/git/discard (Editor+)
+router.post(
+  '/:projectId/git/discard',
+  authenticate,
+  validate(discardPathsSchema),
+  requireRole('editor'),
+  discard
+);
+
+// Endpoint #46: POST /api/v1/projects/:projectId/git/commit (Editor+)
+router.post(
+  '/:projectId/git/commit',
+  authenticate,
+  validate(commitGitSchema),
+  requireRole('editor'),
+  commit
 );
 
 export default router;

@@ -7,6 +7,10 @@ import {
   setGitRemote,
   cloneGitRepository,
   getGitStatus,
+  stageGitPaths,
+  unstageGitPaths,
+  discardGitChanges,
+  commitStagedChanges,
 } from '../services/git.service.js';
 import { findNodeById } from '../repositories/node.repo.js';
 import { computeNodePath } from '../utils/treeUtils.js';
@@ -173,4 +177,64 @@ export const getStatus = asyncHandler(async (req, res) => {
   const status = await getGitStatus(projectId);
 
   return sendSuccess(res, { status }, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/stage (Endpoint #43)
+ * Stage specific paths or all files (".").
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const stage = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { paths } = req.body;
+
+  const result = await stageGitPaths({ projectId, paths });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/unstage (Endpoint #44)
+ * Unstage specific paths or all files (".").
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const unstage = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { paths } = req.body;
+
+  const result = await unstageGitPaths({ projectId, paths });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/discard (Endpoint #45)
+ * Discard working copy changes of specific paths or all files (".").
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const discard = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { paths } = req.body;
+
+  const result = await discardGitChanges({ projectId, paths });
+
+  return sendSuccess(res, result, 200);
+});
+
+/**
+ * POST /api/v1/projects/:projectId/git/commit (Endpoint #46)
+ * Commit staged changes with commit message.
+ * Access: Editor+ (Blueprint & PDF Page 6)
+ */
+export const commit = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { message } = req.body;
+
+  const result = await commitStagedChanges({
+    projectId,
+    message,
+    user: req.user,
+  });
+
+  return sendSuccess(res, result, 201);
 });

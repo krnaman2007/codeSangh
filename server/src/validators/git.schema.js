@@ -54,3 +54,67 @@ export const cloneGitSchema = z.object({
     branch: z.string().trim().min(1).max(50).optional().default('main'),
   }),
 });
+
+export const stagePathsSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  body: z.object({
+    paths: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1, 'Path cannot be empty')
+          .regex(/^(?!\.\.)(?!.*\/\.\.)/, 'Path traversal with .. is forbidden')
+      )
+      .min(1, 'At least one path is required'),
+  }),
+});
+
+export const unstagePathsSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  body: z.object({
+    paths: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1, 'Path cannot be empty')
+          .regex(/^(?!\.\.)(?!.*\/\.\.)/, 'Path traversal with .. is forbidden')
+      )
+      .min(1, 'At least one path is required'),
+  }),
+});
+
+export const discardPathsSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  body: z.object({
+    paths: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1, 'Path cannot be empty')
+          .regex(/^(?!\.\.)(?!.*\/\.\.)/, 'Path traversal with .. is forbidden')
+      )
+      .min(1, 'At least one path is required'),
+  }),
+});
+
+export const commitGitSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  body: z.object({
+    message: z
+      .string()
+      .trim()
+      .min(1, 'Commit message cannot be empty')
+      .max(500, 'Commit message cannot exceed 500 characters'),
+  }),
+});
