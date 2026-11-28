@@ -7,9 +7,17 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { GoogleGenAI } from '@google/genai';
+import { LRUCache } from 'lru-cache';
 import env from '../config/env.js';
 import prisma from '../config/prisma.js';
 import ApiError from '../utils/ApiError.js';
+import { getProjectSettings } from './settings.service.js';
+
+// LRU Cache for inline code completions (key = sha256(language + prefix + suffix), TTL = 5 min)
+export const completionCache = new LRUCache({
+  max: 500,
+  ttl: 5 * 60 * 1000,
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -108,8 +116,15 @@ export async function buildAiContext({ projectId, fileId, selection, includeLast
 export async function streamAiChat({ projectId, user, body, res }) {
   const { conversationId, message, mode = 'ask', context = {} } = body;
 
+  // 0. Check if AI is enabled for this project (Blueprint Section 7.12 & Page 35: 403 AI_DISABLED)
+  const settings = await getProjectSettings(projectId);
+  if (!settings.aiEnabled) {
+    throw new ApiError(403, 'AI_DISABLED', 'AI is turned off for this project by the owner');
+  }
+
   // 1. Check if Gemini API key is configured
-  if (!env.GEMINI_API_KEY) {
+  const apiKey = process.env.GEMINI_API_KEY || env.GEMINI_API_KEY;
+  if (!apiKey) {
     throw new ApiError(
       503,
       'AI_UNAVAILABLE',
@@ -256,3 +271,182 @@ export async function streamAiChat({ projectId, user, body, res }) {
     res.end();
   }
 }
+
+/**
+ * Lists user's AI conversations for a project (Endpoint #64 - Mastermind M5)
+ * Access: Viewer+ (own)
+ * Blueprint Section 7.12 & Page 35
+ */
+export async function getUserConversations({ projectId, userId, page = 1, limit = 20 }) {
+  const p = Math.max(1, parseInt(page, 10) || 1);
+  const l = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
+
+  const conversations = await loadUserConversations(projectId, userId);
+
+  // Sort newest first by updatedAt descending
+  conversations.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+  const total = conversations.length;
+  const startIndex = (p - 1) * l;
+  const paginated = conversations.slice(startIndex, startIndex + l);
+
+  const items = paginated.map((c) => ({
+    id: c.id,
+    title: c.title,
+    updatedAt: c.updatedAt,
+  }));
+
+  return {
+    items,
+    page: p,
+    limit: l,
+    total,
+  };
+}
+
+/**
+ * Retrieves a single conversation with its full message history (Endpoint #65 - Mastermind M5)
+ * Access: Viewer+ (own)
+ * Blueprint Section 7.12 & Page 35
+ */
+export async function getUserConversationById({ projectId, userId, conversationId }) {
+  const conversations = await loadUserConversations(projectId, userId);
+  const conversation = conversations.find((c) => c.id === conversationId);
+
+  if (!conversation) {
+    throw new ApiError(404, 'NOT_FOUND', 'AI Conversation not found');
+  }
+
+  return {
+    conversation: {
+      id: conversation.id,
+      title: conversation.title,
+      messages: conversation.messages || [],
+    },
+  };
+}
+
+/**
+ * Deletes a conversation and cascade-deletes its messages (Endpoint #66 - Mastermind M5)
+ * Access: Viewer+ (own)
+ * Blueprint Section 7.12 & Page 35
+ */
+export async function deleteUserConversation({ projectId, userId, conversationId }) {
+  const conversations = await loadUserConversations(projectId, userId);
+  const index = conversations.findIndex((c) => c.id === conversationId);
+
+  if (index === -1) {
+    throw new ApiError(404, 'NOT_FOUND', 'AI Conversation not found');
+  }
+
+  conversations.splice(index, 1);
+  await saveUserConversations(projectId, userId, conversations);
+
+  return true;
+}
+
+/**
+ * Inline code suggestions provider (Endpoint #67 - Mastermind M6)
+ * Access: Editor+
+ * Blueprint Section 7.12 & Page 35, 57
+ */
+export async function getAiCompletion({ projectId, fileId, language, prefix = '', suffix = '', cursor }) {
+  // 1. Check if AI is enabled for this project (Blueprint Page 35: 403 AI_DISABLED)
+  const settings = await getProjectSettings(projectId);
+  if (!settings.aiEnabled) {
+    throw new ApiError(403, 'AI_DISABLED', 'AI is turned off for this project by the owner');
+  }
+
+  // 2. Validate size limits (max 4 KB prefix, max 1 KB suffix) (Blueprint Page 35: 413 FILE_TOO_LARGE)
+  if (Buffer.byteLength(prefix, 'utf8') > 4096) {
+    throw new ApiError(413, 'FILE_TOO_LARGE', 'Prefix exceeds maximum limit of 4 KB (4096 bytes)');
+  }
+  if (Buffer.byteLength(suffix, 'utf8') > 1024) {
+    throw new ApiError(413, 'FILE_TOO_LARGE', 'Suffix exceeds maximum limit of 1 KB (1024 bytes)');
+  }
+
+  // 3. LRU Cache lookup (key = sha256 of language + prefix + suffix, TTL 5 min)
+  const cacheKey = crypto
+    .createHash('sha256')
+    .update(`${language}:${prefix}:${suffix}`)
+    .digest('hex');
+
+  const cached = completionCache.get(cacheKey);
+  if (cached !== undefined) {
+    return { suggestion: cached };
+  }
+
+  // 4. Check if Gemini API key is configured
+  const apiKey = process.env.GEMINI_API_KEY || env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new ApiError(
+      503,
+      'AI_UNAVAILABLE',
+      'Google Gemini API key is not configured. Please add GEMINI_API_KEY to server/.env'
+    );
+  }
+
+  // 5. Call Gemini completion model (maxOutputTokens: 128, temperature: 0)
+  const model = env.GEMINI_COMPLETION_MODEL || 'gemini-2.5-flash-lite';
+  const prompt = `Language: ${language}\n` +
+    `Code before cursor:\n${prefix}\n` +
+    `Code after cursor:\n${suffix}\n` +
+    `Continue the code immediately after the cursor. Do not include markdown code blocks, do not repeat the prefix or suffix, and output only the direct code continuation:`;
+
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: {
+        systemInstruction:
+          'You are an inline code completion engine for Monaco Editor. ' +
+          'Your task is to provide the next tokens/lines of code directly at the cursor position. ' +
+          'Never output explanations, chat text, or markdown code fences (```). Output raw code only.',
+        maxOutputTokens: 128,
+        temperature: 0,
+      },
+    });
+
+    let text = response?.text || '';
+
+    // 6. Post-processing:
+    // - Code fences removed
+    text = text.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '');
+
+    // - At most 8 lines
+    const lines = text.split('\n');
+    if (lines.length > 8) {
+      text = lines.slice(0, 8).join('\n');
+    }
+
+    // - Dropped if it repeats the suffix or is empty
+    const trimmedText = text.trim();
+    const trimmedSuffix = suffix.trim();
+
+    if (!trimmedText) {
+      completionCache.set(cacheKey, null);
+      return { suggestion: null };
+    }
+
+    if (trimmedSuffix && (trimmedSuffix.startsWith(trimmedText) || trimmedText === trimmedSuffix)) {
+      completionCache.set(cacheKey, null);
+      return { suggestion: null };
+    }
+
+    const suggestion = {
+      id: crypto.randomUUID(),
+      text,
+    };
+
+    completionCache.set(cacheKey, suggestion);
+    return { suggestion };
+  } catch (err) {
+    throw new ApiError(
+      503,
+      'AI_UNAVAILABLE',
+      `Gemini API error during completion: ${err.message}`
+    );
+  }
+}
+

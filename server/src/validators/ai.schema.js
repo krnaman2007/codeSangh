@@ -42,3 +42,37 @@ export const aiChatSchema = z.object({
       .default({}),
   }),
 });
+
+export const listAiConversationsSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  query: z.object({
+    page: z.coerce.number().int().min(1).optional().default(1),
+    limit: z.coerce.number().int().min(1).max(50).optional().default(20),
+  }),
+});
+
+export const aiConversationIdParamSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+    conversationId: z.string().regex(uuidRegex, { message: 'Invalid conversationId format' }),
+  }),
+});
+
+export const aiCompleteSchema = z.object({
+  params: z.object({
+    projectId: z.string().regex(uuidRegex, { message: 'Invalid projectId format' }),
+  }),
+  body: z.object({
+    fileId: z.string().regex(uuidRegex, { message: 'Invalid fileId format' }),
+    language: z.string().trim().min(1, 'Language is required'),
+    prefix: z.string().default(''),
+    suffix: z.string().default(''),
+    cursor: z.object({
+      line: z.number().int().min(1),
+      column: z.number().int().min(1),
+    }),
+  }),
+});
+

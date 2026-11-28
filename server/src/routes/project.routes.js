@@ -66,7 +66,18 @@ import {
   getIceServers,
   getVoiceSessionInfo,
 } from '../controllers/voice.controller.js';
-import { chatWithAi } from '../controllers/ai.controller.js';
+import {
+  chatWithAi,
+  getConversations,
+  getConversation,
+  deleteConversation,
+  completeCode,
+} from '../controllers/ai.controller.js';
+import {
+  updateSettings,
+  getSettings,
+} from '../controllers/settings.controller.js';
+import { aiCompleteRateLimiter } from '../middleware/rateLimiter.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
 import { requireRole } from '../middleware/projectAccess.js';
@@ -135,7 +146,16 @@ import {
   getIceServersSchema,
   getVoiceSessionSchema,
 } from '../validators/voice.schema.js';
-import { aiChatSchema } from '../validators/ai.schema.js';
+import {
+  aiChatSchema,
+  listAiConversationsSchema,
+  aiConversationIdParamSchema,
+  aiCompleteSchema,
+} from '../validators/ai.schema.js';
+import {
+  updateProjectSettingsSchema,
+  getProjectSettingsSchema,
+} from '../validators/settings.schema.js';
 
 const router = Router();
 
@@ -521,6 +541,61 @@ router.post(
   validate(aiChatSchema),
   requireRole('viewer'),
   chatWithAi
+);
+
+// Endpoint #64: GET /api/v1/projects/:projectId/ai/conversations (Viewer+)
+router.get(
+  '/:projectId/ai/conversations',
+  authenticate,
+  validate(listAiConversationsSchema),
+  requireRole('viewer'),
+  getConversations
+);
+
+// Endpoint #65: GET /api/v1/projects/:projectId/ai/conversations/:conversationId (Viewer+)
+router.get(
+  '/:projectId/ai/conversations/:conversationId',
+  authenticate,
+  validate(aiConversationIdParamSchema),
+  requireRole('viewer'),
+  getConversation
+);
+
+// Endpoint #66: DELETE /api/v1/projects/:projectId/ai/conversations/:conversationId (Viewer+)
+router.delete(
+  '/:projectId/ai/conversations/:conversationId',
+  authenticate,
+  validate(aiConversationIdParamSchema),
+  requireRole('viewer'),
+  deleteConversation
+);
+
+// Endpoint #67: POST /api/v1/projects/:projectId/ai/complete (Editor+)
+router.post(
+  '/:projectId/ai/complete',
+  authenticate,
+  validate(aiCompleteSchema),
+  requireRole('editor'),
+  aiCompleteRateLimiter,
+  completeCode
+);
+
+// Endpoint #68: PATCH /api/v1/projects/:projectId/settings (Owner)
+router.patch(
+  '/:projectId/settings',
+  authenticate,
+  validate(updateProjectSettingsSchema),
+  requireRole('owner'),
+  updateSettings
+);
+
+// GET /api/v1/projects/:projectId/settings (Viewer+)
+router.get(
+  '/:projectId/settings',
+  authenticate,
+  validate(getProjectSettingsSchema),
+  requireRole('viewer'),
+  getSettings
 );
 
 export default router;
