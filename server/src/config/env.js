@@ -42,6 +42,11 @@ const env = {
   TURN_SECRET: process.env.TURN_SECRET || 'devsync-coturn-super-secret-key-change-me',
   TURN_CREDENTIAL_TTL_SEC: parseInt(process.env.TURN_CREDENTIAL_TTL_SEC, 10) || 3600,
   VOICE_MAX_PARTICIPANTS: parseInt(process.env.VOICE_MAX_PARTICIPANTS, 10) || 8,
+
+  // AI Assistant & Suggestions (M5, M6 - Blueprint Section 4.1 & Page 8)
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
+  GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  GEMINI_COMPLETION_MODEL: process.env.GEMINI_COMPLETION_MODEL || 'gemini-2.5-flash-lite',
 };
 
 export default env;

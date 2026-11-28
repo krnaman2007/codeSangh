@@ -177,7 +177,7 @@ export function dockerfileFor(spec) {
 /**
  * Retrieves environment configuration and status for a project (Endpoint #56 - Mastermind M3)
  */
-export async function getProjectEnvironment(projectId) {
+export async function getProjectEnvironment(projectId, retries = 2) {
   const filePath = getEnvFilePath(projectId);
 
   if (!fs.existsSync(filePath)) {
@@ -192,6 +192,10 @@ export async function getProjectEnvironment(projectId) {
       ...data,
     };
   } catch (err) {
+    if (retries > 0) {
+      await new Promise((r) => setTimeout(r, 60));
+      return getProjectEnvironment(projectId, retries - 1);
+    }
     throw new ApiError(500, 'ENV_READ_FAILED', `Failed to read project environment: ${err.message}`);
   }
 }

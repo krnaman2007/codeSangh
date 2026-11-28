@@ -27,3 +27,4 @@ export async function disconnectDB() {
 }
 
 export { prisma };
+export default prisma;

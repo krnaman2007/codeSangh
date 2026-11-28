@@ -66,6 +66,7 @@ import {
   getIceServers,
   getVoiceSessionInfo,
 } from '../controllers/voice.controller.js';
+import { chatWithAi } from '../controllers/ai.controller.js';
 import validate from '../middleware/validate.js';
 import authenticate from '../middleware/auth.js';
 import { requireRole } from '../middleware/projectAccess.js';
@@ -134,6 +135,7 @@ import {
   getIceServersSchema,
   getVoiceSessionSchema,
 } from '../validators/voice.schema.js';
+import { aiChatSchema } from '../validators/ai.schema.js';
 
 const router = Router();
 
@@ -510,6 +512,15 @@ router.get(
   validate(getVoiceSessionSchema),
   requireRole('viewer'),
   getVoiceSessionInfo
+);
+
+// Endpoint #63: POST /api/v1/projects/:projectId/ai/chat (Viewer+)
+router.post(
+  '/:projectId/ai/chat',
+  authenticate,
+  validate(aiChatSchema),
+  requireRole('viewer'),
+  chatWithAi
 );
 
 export default router;
